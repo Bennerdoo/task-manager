@@ -165,9 +165,9 @@ CheckElevation:
     ; -----------------------------------------------------------------------
     ; Not elevated. Get our own exe path and re-launch with "runas" verb.
     ; -----------------------------------------------------------------------
-    lea     rcx, [rel szExePath]         ; buffer
-    mov     edx, 512                     ; size
-    xor     r8d, r8d                     ; hModule = NULL (this exe)
+    xor     rcx, rcx                     ; hModule = NULL (this process)
+    lea     rdx, [rel szExePath]         ; lpFilename = buffer
+    mov     r8d, 512                     ; nSize = 512
     call    GetModuleFileNameA
 
     ; ShellExecuteA(NULL, "runas", exePath, NULL, NULL, SW_SHOWNORMAL)

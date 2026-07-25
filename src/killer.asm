@@ -322,16 +322,16 @@ LoadKernelDriver:
     lea     rdx, [rel szDriverSvcName]
     lea     r8,  [rel szDriverSvcDisplay]
     mov     r9d, SERVICE_ALL_ACCESS
-    ; 5th-12th args on stack
-    mov     dword [rsp+32], SERVICE_KERNEL_DRIVER     ; dwServiceType
-    mov     dword [rsp+40], SERVICE_DEMAND_START       ; dwStartType
-    mov     dword [rsp+48], SERVICE_ERROR_IGNORE       ; dwErrorControl
+    ; 5th-13th args on stack (qword slots)
+    mov     qword [rsp+32], SERVICE_KERNEL_DRIVER     ; dwServiceType
+    mov     qword [rsp+40], SERVICE_DEMAND_START       ; dwStartType
+    mov     qword [rsp+48], SERVICE_ERROR_IGNORE       ; dwErrorControl
     lea     rax, [rel szExePathBuf]
     mov     [rsp+56], rax                              ; lpBinaryPathName
     mov     qword [rsp+64], 0                          ; lpLoadOrderGroup
     mov     qword [rsp+72], 0                          ; lpdwTagId
     mov     qword [rsp+80], 0                          ; lpDependencies
-    mov     qword [rsp+88], 0                          ; lpServiceStartName (LocalSystem)
+    mov     qword [rsp+88], 0                          ; lpServiceStartName
     mov     qword [rsp+96], 0                          ; lpPassword
     call    CreateServiceA
     test    rax, rax

@@ -268,32 +268,34 @@ RegisterWindowClass:
 
     %define WCX  rsp+32
 
-    ; Zero the struct
-    xor     rax, rax
-    mov     [WCX + WCEX_cbSize],         dword 80
-    mov     [WCX + WCEX_style],          dword 0x0003   ; CS_HREDRAW | CS_VREDRAW
+    ; Zero out all 80 bytes of WNDCLASSEXA struct
+    lea     rdi, [WCX]
+    xor     eax, eax
+    mov     ecx, 10             ; 10 qwords = 80 bytes
+    rep stosq
+
+    ; Fill struct fields
+    mov     dword [WCX + WCEX_cbSize], 80
+    mov     dword [WCX + WCEX_style],  0x0003   ; CS_HREDRAW | CS_VREDRAW
     lea     rax, [rel WndProc]
-    mov     [WCX + WCEX_lpfnWndProc],    rax
-    mov     [WCX + WCEX_cbClsExtra],     dword 0
-    mov     [WCX + WCEX_cbWndExtra],     dword 0
+    mov     [WCX + WCEX_lpfnWndProc],  rax
     mov     rax, [rel hInstance]
-    mov     [WCX + WCEX_hInstance],      rax
-    mov     qword [WCX + WCEX_hIcon],    0
-    ; Cursor = IDC_ARROW = MAKEINTRESOURCE(32512)
+    mov     [WCX + WCEX_hInstance],    rax
+
+    ; Cursor = IDC_ARROW (32512)
     xor     ecx, ecx
     mov     edx, 32512
     call    LoadCursorA
-    mov     [WCX + WCEX_hCursor],        rax
-    ; Background = black brush (we paint it ourselves)
-    xor     ecx, ecx
-    mov     edx, COLOR_BG
+    mov     [WCX + WCEX_hCursor],      rax
+
+    ; Background = dark brush (crColor passed in RCX for 1st param)
+    mov     ecx, COLOR_BG
     call    CreateSolidBrush
-    mov     [rel hBgBrush],              rax
-    mov     [WCX + WCEX_hbrBackground],  rax
-    mov     qword [WCX + WCEX_lpszMenuName],  0
+    mov     [rel hBgBrush],            rax
+    mov     [WCX + WCEX_hbrBackground], rax
+
     lea     rax, [rel szClassName]
-    mov     [WCX + WCEX_lpszClassName],  rax
-    mov     qword [WCX + WCEX_hIconSm],  0
+    mov     [WCX + WCEX_lpszClassName], rax
 
     lea     rcx, [WCX]
     call    RegisterClassExA
@@ -327,11 +329,12 @@ CreateMainWindow:
     lea     rdx, [rel szClassName]
     lea     r8,  [rel szWindowTitle]
     mov     r9d, (WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN | WS_VISIBLE)
-    ; 5th+ args on stack (8 args = 64 bytes space)
-    mov     dword [rsp+32], ebx                    ; x
-    mov     dword [rsp+40], 100                    ; y
-    mov     dword [rsp+48], INIT_WIDTH             ; nWidth
-    mov     dword [rsp+56], INIT_HEIGHT            ; nHeight
+    ; 5th+ args on stack (8 args = 64 bytes space, set as clean QWORDs)
+    movsxd  rax, ebx
+    mov     [rsp+32], rax                          ; x
+    mov     qword [rsp+40], 100                    ; y
+    mov     qword [rsp+48], INIT_WIDTH             ; nWidth
+    mov     qword [rsp+56], INIT_HEIGHT            ; nHeight
     mov     qword [rsp+64], 0                      ; hwndParent
     mov     qword [rsp+72], 0                      ; hmenu
     mov     rax, [rel hInstance]
@@ -340,7 +343,20 @@ CreateMainWindow:
     call    CreateWindowExA
 
     mov     [rel hMainWnd], rax
+    test    rax, rax
+    jz      .fail
 
+    ; Show and update window
+    mov     rcx, rax
+    mov     edx, 1                                 ; SW_SHOWNORMAL
+    call    ShowWindow
+
+    mov     rcx, [rel hMainWnd]
+    call    UpdateWindow
+
+    mov     rax, [rel hMainWnd]
+
+.fail:
     add     rsp, 96
     pop     rbx
     ret
@@ -356,15 +372,20 @@ WndProc:
     push    rsi
     push    rdi
     push    r15
-    ; 5 pushes = 40 + 8 ret = 48. sub 128: 128 mod 16 = 0. RSP shift = 176; 176/16=11 ✓
-    sub     rsp, 128
+    ; 5 pushes + 8 ret = 48. RSP after pushes = caller - 48 (ALIGNED: 48/16=3).
+    ; sub N divisible by 16.
+    ; CreateFontA has 14 args: args 5-14 need [rsp+32..111] = 80 bytes
+    ; LOC_* must be above [rsp+111] to avoid clobbering.
+    ; Layout: shadow(32) + arg_spill_5_14(80) + LOC_*(48) + pad(16) = 176. 176/16=11 ✓
+    sub     rsp, 176
 
-    %define LOC_HWND   rsp+64     ; QWORD: our window handle
-    %define LOC_MSG    rsp+72     ; DWORD: message id
-    %define LOC_WP     rsp+80     ; QWORD: wParam
-    %define LOC_LP     rsp+88     ; QWORD: lParam
-    %define LOC_RECT   rsp+96     ; RECT (16 bytes)
-    %define LOC_PS     rsp+112    ; PAINTSTRUCT partial (16 bytes, just HDC)
+    ; Locals: [rsp+112..175]
+    %define LOC_HWND   rsp+112    ; QWORD: original hWnd
+    %define LOC_MSG    rsp+120    ; DWORD: uMsg
+    %define LOC_WP     rsp+128    ; QWORD: wParam
+    %define LOC_LP     rsp+136    ; QWORD: lParam
+    %define LOC_RECT   rsp+144    ; RECT  (16 bytes @ [144..159])
+    %define LOC_PS     rsp+160    ; PAINTSTRUCT hdc only (8 bytes @ [160..167])
 
     mov     [LOC_HWND], rcx
     mov     [LOC_MSG],  edx
@@ -411,15 +432,15 @@ WndProc:
     xor     edx, edx               ; nWidth
     xor     r8d, r8d               ; nEscapement
     xor     r9d, r9d               ; nOrientation
-    mov     dword [rsp+32], FW_NORMAL
-    mov     dword [rsp+40], 0     ; bItalic
-    mov     dword [rsp+48], 0     ; bUnderline
-    mov     dword [rsp+56], 0     ; bStrikeOut
-    mov     dword [rsp+64], DEFAULT_CHARSET
-    mov     dword [rsp+72], OUT_DEFAULT_PRECIS
-    mov     dword [rsp+80], CLIP_DEFAULT_PRECIS
-    mov     dword [rsp+88], CLEARTYPE_QUALITY
-    mov     dword [rsp+96], (VARIABLE_PITCH | FF_SWISS)
+    mov     qword [rsp+32], FW_NORMAL
+    mov     qword [rsp+40], 0     ; bItalic
+    mov     qword [rsp+48], 0     ; bUnderline
+    mov     qword [rsp+56], 0     ; bStrikeOut
+    mov     qword [rsp+64], DEFAULT_CHARSET
+    mov     qword [rsp+72], OUT_DEFAULT_PRECIS
+    mov     qword [rsp+80], CLIP_DEFAULT_PRECIS
+    mov     qword [rsp+88], CLEARTYPE_QUALITY
+    mov     qword [rsp+96], (VARIABLE_PITCH | FF_SWISS)
     lea     rax, [rel szFontName]
     mov     [rsp+104], rax
     call    CreateFontA
@@ -430,12 +451,12 @@ WndProc:
     lea     rdx, [rel szLVStyle]
     xor     r8d, r8d               ; window title (none)
     mov     r9d, (WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SHOWSELALWAYS | LVS_SINGLESEL)
-    mov     dword [rsp+32], TOOLBAR_H   ; x
-    mov     dword [rsp+40], TOOLBAR_H   ; y
-    mov     dword [rsp+48], 600         ; w (will resize)
-    mov     dword [rsp+56], 500         ; h (will resize)
+    mov     qword [rsp+32], TOOLBAR_H   ; x
+    mov     qword [rsp+40], TOOLBAR_H   ; y
+    mov     qword [rsp+48], 600         ; w (will resize)
+    mov     qword [rsp+56], 500         ; h (will resize)
     mov     [rsp+64], rbp              ; parent = our hwnd
-    mov     dword [rsp+72], IDC_LISTVIEW ; hMenu = control ID
+    mov     qword [rsp+72], IDC_LISTVIEW ; hMenu = control ID
     mov     rax, [rel hInstance]
     mov     [rsp+80], rax
     mov     qword [rsp+88], 0
@@ -456,12 +477,12 @@ WndProc:
     lea     rdx, [rel szEditCtl]
     xor     r8d, r8d
     mov     r9d, (WS_CHILD | WS_VISIBLE | WS_BORDER)
-    mov     dword [rsp+32], 0
-    mov     dword [rsp+40], 0
-    mov     dword [rsp+48], 200
-    mov     dword [rsp+56], TOOLBAR_H
+    mov     qword [rsp+32], 0
+    mov     qword [rsp+40], 0
+    mov     qword [rsp+48], 200
+    mov     qword [rsp+56], TOOLBAR_H
     mov     [rsp+64], rbp
-    mov     dword [rsp+72], IDC_SEARCHEDIT
+    mov     qword [rsp+72], IDC_SEARCHEDIT
     mov     rax, [rel hInstance]
     mov     [rsp+80], rax
     mov     qword [rsp+88], 0
@@ -485,12 +506,12 @@ WndProc:
     lea     rdx, [rel szStaticBar]
     xor     r8d, r8d
     mov     r9d, (WS_CHILD | WS_VISIBLE)
-    mov     dword [rsp+32], 0
-    mov     dword [rsp+40], 0
-    mov     dword [rsp+48], 0        ; status bar auto-sizes width
-    mov     dword [rsp+56], 0
+    mov     qword [rsp+32], 0
+    mov     qword [rsp+40], 0
+    mov     qword [rsp+48], 0        ; status bar auto-sizes width
+    mov     qword [rsp+56], 0
     mov     [rsp+64], rbp
-    mov     dword [rsp+72], IDC_STATUSBAR
+    mov     qword [rsp+72], IDC_STATUSBAR
     mov     rax, [rel hInstance]
     mov     [rsp+80], rax
     mov     qword [rsp+88], 0
@@ -615,8 +636,11 @@ WndProc:
     ; Fill with dark background
     mov     rcx, r15                   ; wParam = HDC
     lea     rdx, [LOC_RECT]
+    xor     eax, eax
+    mov     dword [LOC_RECT+RECT_left],   eax
+    mov     dword [LOC_RECT+RECT_top],    eax
     mov     eax, [rel clientWidth]
-    mov     dword [LOC_RECT+RECT_right], eax
+    mov     dword [LOC_RECT+RECT_right],  eax
     mov     eax, [rel clientHeight]
     mov     dword [LOC_RECT+RECT_bottom], eax
     mov     r8, [rel hBgBrush]
@@ -956,7 +980,7 @@ WndProc:
     jmp     .epilog
 
 .epilog:
-    add     rsp, 128
+    add     rsp, 176
     pop     r15
     pop     rdi
     pop     rsi

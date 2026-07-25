@@ -72,14 +72,17 @@ WinMainCRTStartup:
     ; (return address from OS was pushed before). Push a dummy value:
     push    rbp
     mov     rbp, rsp
-    sub     rsp, 80    ; shadow(32) + ICCE(8) + MSG(48) − 8 align correction = 80. Check: after push rbp, rsp=orig-16 (aligned). sub 80 → rsp=orig-96. 96/16=6 ✓
+    ; 1 push: RSP after push = orig_rsp - 16 (aligned). sub N must be divisible by 16.
+    ; Layout: shadow(32) + ICCE(8) + pad(8) + MSG(48) = 96. 96/16=6 ✓
+    sub     rsp, 96
 
     ; Stack layout:
-    ;   [rsp+  0] shadow (32)
-    ;   [rsp+ 32] INITCOMMONCONTROLSEX (8 bytes)
-    ;   [rsp+ 40] MSG struct (48 bytes)
+    ;   [rsp+  0..31] shadow space
+    ;   [rsp+ 32..39] INITCOMMONCONTROLSEX (8 bytes)
+    ;   [rsp+ 40..87] scratch / alignment padding
+    ;   [rsp+ 48..95] MSG struct  (48 bytes → [rsp+48..95])
     %define ICCE_FRAME  rsp+32
-    %define MSG_FRAME   rsp+40
+    %define MSG_FRAME   rsp+48
 
     ; -----------------------------------------------------------------------
     ; 1. Get module handle
@@ -154,7 +157,7 @@ WinMainCRTStartup:
     ; 8. Exit
     ; -----------------------------------------------------------------------
 .msg_done:
-    movzx   ecx, word [MSG_FRAME + MSG_wParam]  ; exit code from WM_QUIT wParam
+    mov     ecx, [MSG_FRAME + MSG_wParam]   ; exit code (QWORD wParam, use low DWORD)
     jmp     .exit
 
 .exit_now:

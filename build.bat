@@ -69,11 +69,7 @@ echo.
 
 echo [2/3] Linking AsmTaskMgr.exe...
 
-if exist "%OUT%\manifest.res" (
-    "%GOLINK%" /entry WinMainCRTStartup "%OUT%\main.obj" "%OUT%\window.obj" "%OUT%\listview.obj" "%OUT%\process.obj" "%OUT%\killer.obj" "%OUT%\privilege.obj" "%OUT%\memory.obj" "%OUT%\cpu.obj" "%OUT%\strings.obj" "%OUT%\manifest.res" kernel32.dll user32.dll gdi32.dll comctl32.dll psapi.dll ntdll.dll advapi32.dll shell32.dll /fo "%OUT%\AsmTaskMgr.exe"
-) else (
-    "%GOLINK%" /entry WinMainCRTStartup "%OUT%\main.obj" "%OUT%\window.obj" "%OUT%\listview.obj" "%OUT%\process.obj" "%OUT%\killer.obj" "%OUT%\privilege.obj" "%OUT%\memory.obj" "%OUT%\cpu.obj" "%OUT%\strings.obj" kernel32.dll user32.dll gdi32.dll comctl32.dll psapi.dll ntdll.dll advapi32.dll shell32.dll /fo "%OUT%\AsmTaskMgr.exe"
-)
+"%GOLINK%" /entry WinMainCRTStartup "%OUT%\main.obj" "%OUT%\window.obj" "%OUT%\listview.obj" "%OUT%\process.obj" "%OUT%\killer.obj" "%OUT%\privilege.obj" "%OUT%\memory.obj" "%OUT%\cpu.obj" "%OUT%\strings.obj" kernel32.dll user32.dll gdi32.dll comctl32.dll psapi.dll ntdll.dll advapi32.dll shell32.dll /fo "%OUT%\AsmTaskMgr.exe"
 
 if errorlevel 1 (
     echo [ERROR] Linking AsmTaskMgr.exe FAILED.

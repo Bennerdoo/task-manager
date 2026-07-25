@@ -277,12 +277,11 @@ EnumProcesses:
     mov     edx, [rel procCapacity]
     shl     edx, 1
     mov     [rel procCapacity], edx
-    imul    rdx, PROC_ENTRY_SIZE
-    mov     rcx, rbp
-    mov     r8, rdx
-    mov     r9, [rel procTable]
-    ; HeapReAlloc(heap, 0, ptr, newSize)
-    mov     dword [rsp+32], 0            ; flags
+    mov     rcx, rbp                            ; hHeap
+    xor     edx, edx                            ; dwFlags = 0
+    mov     r8,  [rel procTable]                ; lpMem
+    movsxd  r9,  dword [rel procCapacity]
+    imul    r9,  PROC_ENTRY_SIZE                ; dwBytes = newSize
     call    HeapReAlloc
     test    rax, rax
     jz      .done_enum

@@ -417,13 +417,21 @@ RefreshListView:
     ; cpuPercent_proc = (delta * 100) / 20_000_000
     mov     dword [ITEM_FRAME + LVIT_iSubItem], 3
     mov     rax, [r15 + PE_CPUPCT]      ; delta (QWORD)
+    test    rax, rax
+    jle     .cpu_zero                   ; if <= 0 -> 0%
+    mov     r8, 20000000000
+    cmp     rax, r8                     ; if huge delta -> cap
+    jae     .cpu_zero
     imul    rax, 100
     mov     rcx, 20000000
     xor     rdx, rdx
-    div     rcx                          ; rax = integer CPU%
-    cmp     rax, 999
+    div     rcx                         ; rax = integer CPU%
+    cmp     rax, 100
     jle     .cpu_ok
-    mov     rax, 999
+    mov     rax, 100
+    jmp     .cpu_ok
+.cpu_zero:
+    xor     eax, eax
 .cpu_ok:
     mov     r8d, eax
     lea     rcx, [TXT_FRAME]
