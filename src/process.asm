@@ -12,8 +12,8 @@ default rel
 ;  Win32 / NT imports
 ; ---------------------------------------------------------------------------
 extern CreateToolhelp32Snapshot
-extern Process32FirstA
-extern Process32NextA
+extern Process32First
+extern Process32Next
 extern CloseHandle
 extern OpenProcess
 extern GetProcessMemoryInfo     ; from psapi.dll
@@ -260,7 +260,7 @@ EnumProcesses:
     ; -----------------------------------------------------------------------
     mov     rcx, rdi
     lea     rdx, [PE32_FRAME]
-    call    Process32FirstA
+    call    Process32First
     test    eax, eax
     jz      .done_enum                     ; empty system?
 
@@ -465,7 +465,7 @@ EnumProcesses:
     mov     dword [rsi + PE32_dwSize], PE32_SIZEOF
     mov     rcx, rdi                    ; hSnapshot
     mov     rdx, rsi                    ; &pe32
-    call    Process32NextA
+    call    Process32Next
     test    eax, eax
     jnz     .proc_loop
 
@@ -476,7 +476,7 @@ EnumProcesses:
     mov     rcx, [LOC_HSNAP]
     call    CloseHandle
 
-    movzx   eax, dword [rel procCount]
+    mov     eax, [rel procCount]
     jmp     .epilog
 
 .fail_no_snap:

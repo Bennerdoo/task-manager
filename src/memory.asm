@@ -38,13 +38,14 @@ section .text
 UpdateMemoryStats:
     push    rbp
     mov     rbp, rsp
-    ; Align stack + allocate 64 bytes for MEMORYSTATUSEX + 32 shadow = 96 total
-    ; After push rbp: rsp misaligned by 8. sub 88 → (rsp - 8 - 88) = rsp_before - 96 ✓ (16-byte aligned)
-    sub     rsp, 88
+    ; Stack alignment: push rbp makes rsp 16-byte aligned (2 adjustments of 8 bytes each).
+    ; After push rbp: rsp = caller_rsp - 16 (ALIGNED). sub N must be divisible by 16.
+    ; shadow(32) + MEMORYSTATUSEX(64) = 96 bytes. 96/16 = 6. ✓
+    sub     rsp, 96
 
-    ; --- Fill struct at [rsp+32] ---
+    ; --- Fill struct at [rsp+32] (MEMORYSTATUSEX, 64 bytes → [rsp+32..95]) ---
     mov     dword [rsp+32], 64       ; dwLength = sizeof(MEMORYSTATUSEX)
-    ; zero out rest (optional, but safer)
+    ; zero out rest
     xor     eax, eax
     mov     [rsp+36], eax
     mov     [rsp+40], rax
@@ -53,7 +54,7 @@ UpdateMemoryStats:
     mov     [rsp+64], rax
     mov     [rsp+72], rax
     mov     [rsp+80], rax
-    ; (offset 88 would be out of our 64-byte struct, fine to skip)
+    mov     [rsp+88], rax
 
     ; --- Call GlobalMemoryStatusEx(&msex) ---
     lea     rcx, [rsp+32]
@@ -73,13 +74,13 @@ UpdateMemoryStats:
     mov     [rel availPhysKB], rax
 
     ; Return dwMemoryLoad (offset 4 from struct)
-    movzx   eax, dword [rsp+36]     ; dwMemoryLoad
+    mov     eax, [rsp+36]            ; dwMemoryLoad (DWORD; mov auto-zero-extends on x64)
     jmp     .done
 
 .fail:
     mov     eax, 0xFFFF
 
 .done:
-    add     rsp, 88
+    add     rsp, 96
     pop     rbp
     ret

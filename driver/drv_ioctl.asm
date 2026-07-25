@@ -10,7 +10,6 @@ default rel
 ; ---------------------------------------------------------------------------
 ;  Kernel API imports
 ; ---------------------------------------------------------------------------
-extern IoGetCurrentIrpStackLocation
 extern IofCompleteRequest
 
 ; ---------------------------------------------------------------------------
@@ -125,11 +124,9 @@ IrpDevCtrl:
     mov     rbx, rdx               ; rbx = PIRP
 
     ; -----------------------------------------------------------------------
-    ; 1. Get current IO stack location
+    ; 1. Get current IO stack location (Irp->Tail.Overlay.CurrentStackLocation at offset 0xB8)
     ; -----------------------------------------------------------------------
-    mov     rcx, rbx
-    call    IoGetCurrentIrpStackLocation
-    mov     rsi, rax               ; rsi = PIO_STACK_LOCATION
+    mov     rsi, [rbx + 0xB8]      ; rsi = PIO_STACK_LOCATION
 
     ; -----------------------------------------------------------------------
     ; 2. Check IoControlCode

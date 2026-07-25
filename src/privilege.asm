@@ -65,55 +65,66 @@ AcquireDebugPrivilege:
     push    rbx
     push    rsi
     push    rdi
-    sub     rsp, 88          ; 32 shadow + 48 locals + 8 align
+    ; 3 pushes + 8 ret = 32 total. RSP after pushes = caller_rsp - 32 (ALIGNED).
+    ; sub N must be divisible by 16.
+    ; Layout: shadow(32) + arg5/6 spill(16) + TOKEN_PRIVILEGES(24) + hToken(8) = 80. 80/16=5 ✓
+    sub     rsp, 80
 
-    ; --- Allocate TOKEN_PRIVILEGES on stack (24 bytes) ---
-    ; We'll use [rsp+32] for TOKEN_PRIVILEGES
+    ; Stack:
+    ;   [rsp+  0..31] shadow space
+    ;   [rsp+ 32..39] 5th arg slot for calls with 5+ args
+    ;   [rsp+ 40..47] 6th arg slot
+    ;   [rsp+ 48..51] TOKEN_PRIVILEGES.PrivilegeCount (DWORD)
+    ;   [rsp+ 52..55] (4 bytes padding for LUID 8-byte alignment)
+    ;   [rsp+ 56..63] TOKEN_PRIVILEGES.Luid (QWORD)
+    ;   [rsp+ 64..67] TOKEN_PRIVILEGES.Attributes (DWORD)
+    ;   [rsp+ 68..71] (padding)
+    ;   [rsp+ 72..79] hToken (QWORD)
 
     ; --- 1. Get current process handle ---
     call    GetCurrentProcess
-    mov     rbx, rax         ; rbx = pseudo-handle (-1 / 0xFFFFFFFFFFFFFFFF)
+    mov     rbx, rax         ; rbx = pseudo-handle
 
     ; --- 2. OpenProcessToken(CurrentProcess, TOKEN_QUERY|TOKEN_ADJUST, &hToken) ---
-    lea     rdi, [rsp+64]    ; rdi = &hToken (on stack above shadow)
     mov     rcx, rbx                    ; hProcess
     mov     edx, 0x0028                 ; TOKEN_QUERY | TOKEN_ADJUST_PRIVILEGES
-    mov     r8,  rdi                    ; &hToken
+    lea     r8,  [rsp+72]               ; &hToken  ← stored at [rsp+72]
     call    OpenProcessToken
     test    eax, eax
     jz      .fail
 
-    mov     rsi, [rsp+64]    ; rsi = hToken
+    mov     rsi, [rsp+72]               ; rsi = hToken
 
     ; --- 3. LookupPrivilegeValueA(NULL, "SeDebugPrivilege", &luid) ---
-    ;     luid lives at [rsp+32+8] = [rsp+40] (inside TOKEN_PRIVILEGES.Luid)
+    ;     LUID lives inside TOKEN_PRIVILEGES at [rsp+56] (offset 8 from struct base [rsp+48])
     xor     ecx, ecx                    ; lpSystemName = NULL
     lea     rdx, [rel szSeDebugPriv]    ; lpName
-    lea     r8,  [rsp+40]               ; lpLuid  (TOKEN_PRIVILEGES.Luid)
+    lea     r8,  [rsp+56]               ; lpLuid (TOKEN_PRIVILEGES.Luid)
     call    LookupPrivilegeValueA
     test    eax, eax
     jz      .close_token_fail
 
-    ; --- 4. Fill TOKEN_PRIVILEGES struct ---
-    mov     dword [rsp+32],  1          ; PrivilegeCount = 1
-    ; Luid already written by LookupPrivilegeValueA at [rsp+40..47]
-    mov     dword [rsp+48],  0x00000002 ; Attributes = SE_PRIVILEGE_ENABLED
+    ; --- 4. Fill TOKEN_PRIVILEGES struct at [rsp+48] ---
+    mov     dword [rsp+48], 1           ; PrivilegeCount = 1
+    ; Luid already filled by LookupPrivilegeValueA into [rsp+56..63]
+    mov     dword [rsp+64], 0x00000002  ; Attributes = SE_PRIVILEGE_ENABLED
 
     ; --- 5. AdjustTokenPrivileges(hToken, FALSE, &tp, sizeof, NULL, NULL) ---
+    ;   Args 5/6 go to [rsp+32]/[rsp+40] — SAFE: TOKEN_PRIVILEGES is at [rsp+48]
     mov     rcx, rsi                    ; hToken
     xor     edx, edx                    ; DisableAllPrivileges = FALSE
-    lea     r8,  [rsp+32]               ; pNewState (TOKEN_PRIVILEGES)
-    mov     r9d, 24                     ; BufferLength
-    mov     qword [rsp+32+32], 0        ; PreviousState = NULL (5th arg on stack above shadow)
-    mov     qword [rsp+32+40], 0        ; ReturnLength = NULL (6th arg)
+    lea     r8,  [rsp+48]               ; pNewState (TOKEN_PRIVILEGES)
+    mov     r9d, 24                     ; BufferLength (sizeof TOKEN_PRIVILEGES w/ 1 entry)
+    mov     qword [rsp+32], 0           ; arg5: PreviousState = NULL
+    mov     qword [rsp+40], 0           ; arg6: ReturnLength = NULL
     call    AdjustTokenPrivileges
     test    eax, eax
     jz      .close_token_fail
 
-    ; Check GetLastError == ERROR_NOT_ALL_ASSIGNED (doesn't mean API failed but priv unavail)
+    ; Check GetLastError for ERROR_NOT_ALL_ASSIGNED
     call    GetLastError
     test    eax, eax
-    jnz     .close_token_fail           ; non-zero → partial / not all assigned
+    jnz     .close_token_fail
 
     ; --- 6. Close token ---
     mov     rcx, rsi
@@ -126,9 +137,9 @@ AcquireDebugPrivilege:
     mov     rcx, rsi
     call    CloseHandle
 .fail:
-    xor     eax, eax                    ; failure
+    xor     eax, eax
 .done:
-    add     rsp, 88
+    add     rsp, 80
     pop     rdi
     pop     rsi
     pop     rbx

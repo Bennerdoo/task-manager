@@ -1,8 +1,10 @@
-# =============================================================
-#  make_manifest_res.ps1
-#  Generates build\manifest.res from res\manifest.xml
-#  No Windows SDK required.  Run from workspace root.
-# =============================================================
+# =============================================================================
+#  make_manifest_res.ps1  —  AsmTaskMgr
+#  Builds a binary .res file embedding manifest.xml as RT_MANIFEST (type 24).
+#  Uses [System.BitConverter] to avoid PowerShell operator type issues.
+#  Usage:
+#    powershell -File make_manifest_res.ps1 -ManifestPath res\manifest.xml -OutPath build\manifest.res
+# =============================================================================
 param(
     [string]$ManifestPath = "res\manifest.xml",
     [string]$OutPath      = "build\manifest.res"
@@ -11,75 +13,64 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-# ---- Read manifest XML as raw bytes (no BOM) ----------------
-$xmlBytes = [System.IO.File]::ReadAllBytes($ManifestPath)
-$dataSize = $xmlBytes.Length
-
-# ---- Helper: little-endian DWORD ----------------------------
-function DWORD([uint32]$v) {
-    return [byte[]]@($v -band 0xFF, ($v -shr 8) -band 0xFF,
-                      ($v -shr 16) -band 0xFF, ($v -shr 24) -band 0xFF)
+# ---- Read the manifest XML bytes ----
+if (-not (Test-Path $ManifestPath)) {
+    Write-Error "Manifest not found: $ManifestPath"
+    exit 1
 }
-# ---- Helper: little-endian WORD -----------------------------
-function WORD([uint16]$v) {
-    return [byte[]]@($v -band 0xFF, ($v -shr 8) -band 0xFF)
-}
+$xmlBytes  = [System.IO.File]::ReadAllBytes((Resolve-Path $ManifestPath))
+$dataSize  = [uint32]$xmlBytes.Length
 
-# =============================================================
-#  .res binary format (per Microsoft docs):
-#
-#  RESOURCE_HEADER:
-#    DataSize     DWORD
-#    HeaderSize   DWORD  (= 32 for ordinal type+name)
-#    Type         WORD 0xFFFF + WORD typeId   (ordinal)
-#    Name         WORD 0xFFFF + WORD nameId   (ordinal)
-#    DataVersion  DWORD
-#    MemoryFlags  WORD
-#    LanguageId   WORD
-#    Version      DWORD
-#    Characteristics DWORD
-#  [Data bytes]
-#  [Padding to DWORD boundary]
-# =============================================================
+# ---- Helper: append little-endian integers via BitConverter ----
+function Add-U32 {
+    param($list, [uint32]$v)
+    $list.AddRange([System.BitConverter]::GetBytes($v))
+}
+function Add-U16 {
+    param($list, [uint16]$v)
+    $list.AddRange([System.BitConverter]::GetBytes($v))
+}
 
 $res = [System.Collections.Generic.List[byte]]::new()
 
-# ---- Entry 1: Empty resource (null type/name) ---------------
-$res.AddRange((DWORD 0))          # DataSize = 0
-$res.AddRange((DWORD 32))         # HeaderSize = 32
-$res.AddRange((WORD  0xFFFF))     # Type ordinal marker
-$res.AddRange((WORD  0x0000))     # Type = 0
-$res.AddRange((WORD  0xFFFF))     # Name ordinal marker
-$res.AddRange((WORD  0x0000))     # Name = 0
-$res.AddRange((DWORD 0))          # DataVersion
-$res.AddRange((WORD  0x0000))     # MemoryFlags
-$res.AddRange((WORD  0x0000))     # LanguageId
-$res.AddRange((DWORD 0))          # Version
-$res.AddRange((DWORD 0))          # Characteristics
+# ---- Empty/padding resource header (required first entry in .res files) ----
+# DataSize = 0, HeaderSize = 32
+Add-U32 $res ([uint32]0)          # DataSize
+Add-U32 $res ([uint32]32)         # HeaderSize
+Add-U16 $res ([uint16]0xFFFF)     # TYPE: ordinal marker
+Add-U16 $res ([uint16]0x0000)     # TYPE: 0
+Add-U16 $res ([uint16]0xFFFF)     # NAME: ordinal marker
+Add-U16 $res ([uint16]0x0000)     # NAME: 0
+Add-U32 $res ([uint32]0)          # DataVersion
+Add-U16 $res ([uint16]0x0000)     # MemoryFlags
+Add-U16 $res ([uint16]0x0000)     # LanguageId
+Add-U32 $res ([uint32]0)          # Version
+Add-U32 $res ([uint32]0)          # Characteristics
 
-# ---- Entry 2: RT_MANIFEST (type 24, name 1, lang 0x0409) ----
-$res.AddRange((DWORD ([uint32]$dataSize)))  # DataSize
-$res.AddRange((DWORD 32))                  # HeaderSize = 32
-$res.AddRange((WORD  0xFFFF))              # Type ordinal marker
-$res.AddRange((WORD  0x0018))              # Type = 24 (RT_MANIFEST)
-$res.AddRange((WORD  0xFFFF))              # Name ordinal marker
-$res.AddRange((WORD  0x0001))              # Name = 1 (CREATEPROCESS_MANIFEST_RESOURCE_ID)
-$res.AddRange((DWORD 0))                   # DataVersion
-$res.AddRange((WORD  0x1030))              # MemoryFlags
-$res.AddRange((WORD  0x0409))              # LanguageId = English (US)
-$res.AddRange((DWORD 0))                   # Version
-$res.AddRange((DWORD 0))                   # Characteristics
+# ---- RT_MANIFEST resource (type=24/0x18, name=1, lang=0x0409 en-US) ----
+Add-U32 $res $dataSize            # DataSize = xml byte length
+Add-U32 $res ([uint32]32)         # HeaderSize = 32
+Add-U16 $res ([uint16]0xFFFF)     # TYPE: ordinal marker
+Add-U16 $res ([uint16]0x0018)     # TYPE: 24 = RT_MANIFEST
+Add-U16 $res ([uint16]0xFFFF)     # NAME: ordinal marker
+Add-U16 $res ([uint16]0x0001)     # NAME: 1 (CREATEPROCESS_MANIFEST_RESOURCE_ID)
+Add-U32 $res ([uint32]0)          # DataVersion
+Add-U16 $res ([uint16]0x1030)     # MemoryFlags (MOVEABLE|PURE|PRELOAD)
+Add-U16 $res ([uint16]0x0409)     # LanguageId: en-US
+Add-U32 $res ([uint32]0)          # Version
+Add-U32 $res ([uint32]0)          # Characteristics
 
-# ---- Manifest data ------------------------------------------
+# ---- Raw manifest XML data ----
 $res.AddRange($xmlBytes)
 
-# ---- Pad to DWORD boundary ----------------------------------
-$pad = (4 - ($dataSize % 4)) % 4
-for ($i = 0; $i -lt $pad; $i++) { $res.Add(0) }
+# ---- Pad data section to DWORD boundary ----
+$pad = [int]((4 - ($dataSize % 4)) % 4)
+for ($i = 0; $i -lt $pad; $i++) { $res.Add([byte]0) }
 
-# ---- Write output -------------------------------------------
-$outDir = [System.IO.Path]::GetDirectoryName($OutPath)
-if (-not (Test-Path $outDir)) { New-Item -ItemType Directory -Path $outDir | Out-Null }
+# ---- Write output ----
+$outDir = Split-Path $OutPath -Parent
+if ($outDir -and -not (Test-Path $outDir)) {
+    New-Item -ItemType Directory -Path $outDir | Out-Null
+}
 [System.IO.File]::WriteAllBytes($OutPath, $res.ToArray())
-
-Write-Host "[manifest] $OutPath written ($($res.Count) bytes, manifest=$dataSize bytes)"
+Write-Host "[manifest] Written: $OutPath ($($res.Count) bytes, manifest=$dataSize bytes)"

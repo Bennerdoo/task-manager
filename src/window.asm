@@ -262,7 +262,9 @@ section .text
 ; ===========================================================================
 RegisterWindowClass:
     push    rbx
-    sub     rsp, 120        ; shadow(32) + WNDCLASSEXA(80) + pad(8)
+    ; 1 push + 8 ret = 16. RSP after push = caller_rsp - 16 (ALIGNED).
+    ; sub N divisible by 16: shadow(32)+WNDCLASSEXA(80) = 112. 112/16=7 ✓
+    sub     rsp, 112
 
     %define WCX  rsp+32
 
@@ -296,7 +298,7 @@ RegisterWindowClass:
     lea     rcx, [WCX]
     call    RegisterClassExA
 
-    add     rsp, 120
+    add     rsp, 112
     pop     rbx
     ret
     %undef WCX
@@ -308,7 +310,9 @@ RegisterWindowClass:
 ; ===========================================================================
 CreateMainWindow:
     push    rbx
-    sub     rsp, 40
+    ; 1 push + 8 ret = 16. RSP after push = caller_rsp - 16 (ALIGNED).
+    ; sub N divisible by 16: shadow(32) + 8 stack args for CreateWindowExA(64) = 96. 96/16=6 ✓
+    sub     rsp, 96
 
     ; Get screen center for placement
     mov     ecx, SM_CXSCREEN
@@ -323,9 +327,9 @@ CreateMainWindow:
     lea     rdx, [rel szClassName]
     lea     r8,  [rel szWindowTitle]
     mov     r9d, (WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN | WS_VISIBLE)
-    ; 5th+ args on stack
+    ; 5th+ args on stack (8 args = 64 bytes space)
     mov     dword [rsp+32], ebx                    ; x
-    mov     dword [rsp+40], 100                    ; y (fixed for simplicity)
+    mov     dword [rsp+40], 100                    ; y
     mov     dword [rsp+48], INIT_WIDTH             ; nWidth
     mov     dword [rsp+56], INIT_HEIGHT            ; nHeight
     mov     qword [rsp+64], 0                      ; hwndParent
@@ -337,7 +341,7 @@ CreateMainWindow:
 
     mov     [rel hMainWnd], rax
 
-    add     rsp, 40
+    add     rsp, 96
     pop     rbx
     ret
 
@@ -611,10 +615,10 @@ WndProc:
     ; Fill with dark background
     mov     rcx, r15                   ; wParam = HDC
     lea     rdx, [LOC_RECT]
-    mov     dword [LOC_RECT+RECT_left],   0
-    mov     dword [LOC_RECT+RECT_top],    0
-    mov     dword [LOC_RECT+RECT_right],  [rel clientWidth]
-    mov     dword [LOC_RECT+RECT_bottom], [rel clientHeight]
+    mov     eax, [rel clientWidth]
+    mov     dword [LOC_RECT+RECT_right], eax
+    mov     eax, [rel clientHeight]
+    mov     dword [LOC_RECT+RECT_bottom], eax
     mov     r8, [rel hBgBrush]
     call    FillRect
     mov     eax, 1

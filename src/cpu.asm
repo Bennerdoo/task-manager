@@ -41,8 +41,9 @@ UpdateCpuUsage:
     push    rbx
     push    rsi
     push    rdi
-    sub     rsp, 56      ; 32 shadow + 24 for 3 FILETIMEs + 0 (already 8-byte aligned)
-                         ; stack: 8(ret) + 8(rbx) + 8(rsi) + 8(rdi) + 56 = 88 → 16-byte ✓
+    ; 3 pushes + 8 ret = 32 total. RSP after pushes = caller_rsp - 32 (ALIGNED).
+    ; sub N must be divisible by 16. shadow(32) + FILETIMEs(24) + pad(8) = 64. 64/16=4 ✓
+    sub     rsp, 64
 
     ; --- GetSystemTimes(&idleTime, &kernelTime, &userTime) ---
     ; Store the three FILETIMEs at [rsp+32], [rsp+40], [rsp+48]
@@ -111,14 +112,14 @@ UpdateCpuUsage:
     jmp     .done
 
 .return_prev:
-    movzx   eax, dword [rel cpuPercent]
+    mov     eax, [rel cpuPercent]       ; plain mov auto-zero-extends (movzx dword is illegal)
     jmp     .done
 
 .fail:
     xor     eax, eax
 
 .done:
-    add     rsp, 56
+    add     rsp, 64
     pop     rdi
     pop     rsi
     pop     rbx

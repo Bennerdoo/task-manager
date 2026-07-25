@@ -734,9 +734,14 @@ StrCmpAnsi:
     inc     rdi
     jmp     .cmp_loop
 
-.less:    mov eax, -1 : jmp .ret
-.greater: mov eax, 1  : jmp .ret
-.equal:   xor eax, eax
+.less:
+    mov     eax, -1
+    jmp     .ret
+.greater:
+    mov     eax, 1
+    jmp     .ret
+.equal:
+    xor     eax, eax
 .ret:
     pop     rdi
     pop     rsi

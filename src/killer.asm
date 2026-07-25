@@ -242,7 +242,9 @@ KillProcess:
 ; ===========================================================================
 OpenDriverDevice:
     push    rbx
-    sub     rsp, 40
+    ; 1 push + 8 ret = 16. RSP after push = caller_rsp - 16 (ALIGNED).
+    ; sub N divisible by 16: shadow(32)+arg5/6/7 spill(24)+pad(8)=64. 64/16=4 ✓
+    sub     rsp, 64
 
     ; Check if already open
     mov     rax, [rel hDeviceDriver]
@@ -266,7 +268,7 @@ OpenDriverDevice:
     mov     [rel hDeviceDriver], rax
 
 .done:
-    add     rsp, 40
+    add     rsp, 64
     pop     rbx
     ret
 
