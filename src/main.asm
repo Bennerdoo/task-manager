@@ -15,6 +15,7 @@ extern GetModuleHandleA
 extern GetCommandLineA
 extern ExitProcess
 extern InitCommonControlsEx
+extern MessageBoxA
 
 ; ---------------------------------------------------------------------------
 ;  External functions from other modules
@@ -40,6 +41,8 @@ global WinMainCRTStartup
 ; ---------------------------------------------------------------------------
 %define SW_SHOWDEFAULT        10
 %define ICC_WIN95_CLASSES     0x000000FF
+%define MB_OK                 0
+%define MB_ICONINFORMATION    0x40
 
 ; INITCOMMONCONTROLSEX struct (8 bytes)
 %define ICCE_dwSize  0
@@ -60,6 +63,18 @@ extern TranslateMessage
 extern DispatchMessageA
 extern IsDialogMessageA
 
+; ---------------------------------------------------------------------------
+section .data
+szDbg1:  db 'DBG1: Entry point reached',0
+szDbg2:  db 'DBG2: After CheckElevation (not 0xDEAD)',0
+szDbg3:  db 'DBG3: After InitCommonControlsEx',0
+szDbg4:  db 'DBG4: RegisterWindowClass returned non-zero',0
+szDbg4f: db 'DBG4F: RegisterWindowClass returned ZERO - FAIL',0
+szDbg5:  db 'DBG5: CreateMainWindow returned non-zero',0
+szDbg5f: db 'DBG5F: CreateMainWindow returned ZERO - FAIL',0
+szDbg6:  db 'DBG6: Entering message loop',0
+szDbgT:  db 'AsmTaskMgr Debug',0
+
 ; ===========================================================================
 ;  WinMainCRTStartup  —  PE entry point
 ;  Windows calls this directly (subsystem:gui → no console).
@@ -67,9 +82,6 @@ extern IsDialogMessageA
 section .text
 
 WinMainCRTStartup:
-    ; No callee-saved regs to save at the entry point.
-    ; We MUST align RSP to 16 bytes. Upon entry RSP is 8-byte aligned
-    ; (return address from OS was pushed before). Push a dummy value:
     push    rbp
     mov     rbp, rsp
     ; 1 push: RSP after push = orig_rsp - 16 (aligned). sub N must be divisible by 16.
@@ -79,8 +91,8 @@ WinMainCRTStartup:
     ; Stack layout:
     ;   [rsp+  0..31] shadow space
     ;   [rsp+ 32..39] INITCOMMONCONTROLSEX (8 bytes)
-    ;   [rsp+ 40..87] scratch / alignment padding
-    ;   [rsp+ 48..95] MSG struct  (48 bytes → [rsp+48..95])
+    ;   [rsp+ 40..47] scratch / padding
+    ;   [rsp+ 48..95] MSG struct  (48 bytes)
     %define ICCE_FRAME  rsp+32
     %define MSG_FRAME   rsp+48
 
@@ -91,6 +103,13 @@ WinMainCRTStartup:
     call    GetModuleHandleA
     mov     [rel hInstance], rax
 
+    ; --- DEBUG 1 ---
+    xor     ecx, ecx
+    lea     rdx, [rel szDbg1]
+    lea     r8,  [rel szDbgT]
+    mov     r9d, MB_OK
+    call    MessageBoxA
+
     ; -----------------------------------------------------------------------
     ; 2. Check / acquire elevation
     ; -----------------------------------------------------------------------
@@ -98,7 +117,13 @@ WinMainCRTStartup:
     cmp     eax, 0xDEAD               ; sentinel: re-launched, exit this instance
     je      .exit_now
     ; If EAX == 0 (no elevation and ShellExecute failed), we proceed anyway
-    ; (might as well try – no harm in running without admin for listing)
+
+    ; --- DEBUG 2 ---
+    xor     ecx, ecx
+    lea     rdx, [rel szDbg2]
+    lea     r8,  [rel szDbgT]
+    mov     r9d, MB_OK
+    call    MessageBoxA
 
     ; -----------------------------------------------------------------------
     ; 3. Acquire SeDebugPrivilege
@@ -114,19 +139,65 @@ WinMainCRTStartup:
     lea     rcx, [ICCE_FRAME]
     call    InitCommonControlsEx
 
+    ; --- DEBUG 3 ---
+    xor     ecx, ecx
+    lea     rdx, [rel szDbg3]
+    lea     r8,  [rel szDbgT]
+    mov     r9d, MB_OK
+    call    MessageBoxA
+
     ; -----------------------------------------------------------------------
     ; 5. Register window class
     ; -----------------------------------------------------------------------
     call    RegisterWindowClass
     test    eax, eax
-    jz      .exit_now
+    jnz     .regclass_ok
+
+    ; --- DEBUG 4F: RegisterWindowClass failed ---
+    xor     ecx, ecx
+    lea     rdx, [rel szDbg4f]
+    lea     r8,  [rel szDbgT]
+    mov     r9d, MB_OK
+    call    MessageBoxA
+    jmp     .exit_now
+
+.regclass_ok:
+    ; --- DEBUG 4 ---
+    xor     ecx, ecx
+    lea     rdx, [rel szDbg4]
+    lea     r8,  [rel szDbgT]
+    mov     r9d, MB_OK
+    call    MessageBoxA
 
     ; -----------------------------------------------------------------------
     ; 6. Create main window
     ; -----------------------------------------------------------------------
     call    CreateMainWindow
     test    rax, rax
-    jz      .exit_now
+    jnz     .createwnd_ok
+
+    ; --- DEBUG 5F: CreateMainWindow failed ---
+    xor     ecx, ecx
+    lea     rdx, [rel szDbg5f]
+    lea     r8,  [rel szDbgT]
+    mov     r9d, MB_OK
+    call    MessageBoxA
+    jmp     .exit_now
+
+.createwnd_ok:
+    ; --- DEBUG 5 ---
+    xor     ecx, ecx
+    lea     rdx, [rel szDbg5]
+    lea     r8,  [rel szDbgT]
+    mov     r9d, MB_OK
+    call    MessageBoxA
+
+    ; --- DEBUG 6 ---
+    xor     ecx, ecx
+    lea     rdx, [rel szDbg6]
+    lea     r8,  [rel szDbgT]
+    mov     r9d, MB_OK
+    call    MessageBoxA
 
     ; -----------------------------------------------------------------------
     ; 7. Message loop
