@@ -640,9 +640,9 @@ WndProc:
     xor     r9d, r9d
     call    MessageBoxA
 
-    ; --- Initial process enumeration ---
-    call    EnumProcesses
-    call    RefreshListView
+    ; --- Initial process enumeration --- SKIPPED FOR TESTING ---
+    ; call    EnumProcesses
+    ; call    RefreshListView
 
     ; --- DBG WC-H ---
     xor     ecx, ecx
@@ -783,8 +783,8 @@ WndProc:
     lea     r9, [rel searchFilter]
     call    SendMessageA
 
-    call    EnumProcesses
-    call    RefreshListView
+    ; call    EnumProcesses     ; SKIPPED FOR TESTING
+    ; call    RefreshListView   ; SKIPPED FOR TESTING
     xor     eax, eax
     jmp     .epilog
 

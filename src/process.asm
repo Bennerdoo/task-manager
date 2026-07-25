@@ -106,7 +106,8 @@ szEP2:  db 'EP2: After EnsureHeap',0
 szEP3:  db 'EP3: After HeapAlloc (new table)',0
 szEP4:  db 'EP4: After CreateToolhelp32Snapshot',0
 szEP5:  db 'EP5: After Process32First',0
-szEP6:  db 'EP6: Leaving proc_loop',0
+szEP6:  db 'EP6: proc_loop top (first iter)',0
+szEP7:  db 'EP7: After zero_loop',0
 szEPT:  db 'EnumProcesses Debug',0
 
 ; ===========================================================================
@@ -324,6 +325,29 @@ EnumProcesses:
     ; 7. Main enumeration loop
     ; -----------------------------------------------------------------------
 .proc_loop:
+    ; --- EP6: Show ONCE (only first iteration via procCount==0 check) ---
+    cmp     dword [rel procCount], 0
+    jne     .skip_ep6_probe
+    push    rax
+    push    rcx
+    push    rdx
+    push    r8
+    push    r9
+    push    r10
+    push    r11
+    xor     ecx, ecx
+    lea     rdx, [rel szEP6]
+    lea     r8,  [rel szEPT]
+    xor     r9d, r9d
+    call    MessageBoxA
+    pop     r11
+    pop     r10
+    pop     r9
+    pop     r8
+    pop     rdx
+    pop     rcx
+    pop     rax
+.skip_ep6_probe:
     ; Check capacity
     mov     eax, [rel procCount]
     cmp     eax, [rel procCapacity]
@@ -359,6 +383,29 @@ EnumProcesses:
     dec     ecx
     jnz     .zero_loop
 
+    ; --- EP7: After zero_loop (first iter only) ---
+    cmp     dword [rel procCount], 0
+    jne     .skip_ep7_probe
+    push    rax
+    push    rcx
+    push    rdx
+    push    r8
+    push    r9
+    push    r10
+    push    r11
+    xor     ecx, ecx
+    lea     rdx, [rel szEP7]
+    lea     r8,  [rel szEPT]
+    xor     r9d, r9d
+    call    MessageBoxA
+    pop     r11
+    pop     r10
+    pop     r9
+    pop     r8
+    pop     rdx
+    pop     rcx
+    pop     rax
+.skip_ep7_probe:
     ; --- Copy PID ---
     mov     eax, dword [PE32_FRAME + PE32_th32ProcessID]
     mov     dword [rdi + PE_PID], eax
