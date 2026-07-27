@@ -379,7 +379,7 @@ RefreshListView:
     ; InsertItem (column 0)
     mov     rcx, rbp
     mov     edx, LVM_INSERTITEMA
-    mov     r8d, esi
+    xor     r8d, r8d                     ; wParam MUST be 0 for LVM_INSERTITEM
     lea     r9, [ITEM_FRAME]
     call    SendMessageA
 

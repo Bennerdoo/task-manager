@@ -67,7 +67,9 @@ if errorlevel 1 goto :build_fail
 echo [OK] All user-mode modules assembled.
 echo.
 
-echo [2/3] Linking AsmTaskMgr.exe...
+if exist "%OUT%\AsmTaskMgr_old.exe" del /f /q "%OUT%\AsmTaskMgr_old.exe" >nul 2>&1
+if exist "%OUT%\AsmTaskMgr.exe" del /f /q "%OUT%\AsmTaskMgr.exe" >nul 2>&1
+if exist "%OUT%\AsmTaskMgr.exe" ren "%OUT%\AsmTaskMgr.exe" "AsmTaskMgr_old.exe" >nul 2>&1
 
 "%GOLINK%" /entry WinMainCRTStartup "%OUT%\main.obj" "%OUT%\window.obj" "%OUT%\listview.obj" "%OUT%\process.obj" "%OUT%\killer.obj" "%OUT%\privilege.obj" "%OUT%\memory.obj" "%OUT%\cpu.obj" "%OUT%\strings.obj" kernel32.dll user32.dll gdi32.dll comctl32.dll psapi.dll ntdll.dll advapi32.dll shell32.dll /fo "%OUT%\AsmTaskMgr.exe"
 

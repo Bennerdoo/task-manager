@@ -26,7 +26,6 @@ extern HeapAlloc
 extern HeapReAlloc
 extern HeapFree
 extern GetCurrentProcess
-extern MessageBoxA
 
 ; ---------------------------------------------------------------------------
 ;  Globals from strings.asm (.bss and .data)
@@ -56,7 +55,6 @@ global EnumProcesses
 %define PE32_dwSize           0
 %define PE32_cntUsage         4
 %define PE32_th32ProcessID    8
-;   (4 bytes padding at 12)
 %define PE32_th32DefaultHeapID 16
 %define PE32_th32ModuleID     24
 %define PE32_cntThreads       28
@@ -100,16 +98,6 @@ szUnknownUser:  db 'SYSTEM', 0
 szNA:           db 'N/A', 0
 INITIAL_CAP     equ 256
 
-; Debug strings for EnumProcesses
-szEP1:  db 'EP1: EnumProcesses entry',0
-szEP2:  db 'EP2: After EnsureHeap',0
-szEP3:  db 'EP3: After HeapAlloc (new table)',0
-szEP4:  db 'EP4: After CreateToolhelp32Snapshot',0
-szEP5:  db 'EP5: After Process32First',0
-szEP6:  db 'EP6: proc_loop top (first iter)',0
-szEP7:  db 'EP7: After zero_loop',0
-szEPT:  db 'EnumProcesses Debug',0
-
 ; ===========================================================================
 ;  SECTION .text
 ; ===========================================================================
@@ -118,16 +106,11 @@ section .text
 ; ---------------------------------------------------------------------------
 ;  Internal: EnsureHeap — caches GetProcessHeap()
 ;  Out: RAX = heap handle
-;  Preserves all other registers.
 ; ---------------------------------------------------------------------------
 EnsureHeap:
     mov rax, [rel hHeap]
     test rax, rax
     jnz .done
-    ; Need shadow space (32) + alignment. On entry RSP is 8-byte aligned
-    ; (caller did CALL which pushed 8-byte ret addr). sub 40 → 48 total shift → misaligned.
-    ; sub 24 → 32 total shift → still misaligned for calls. Use sub 40 (shadow=32 + pad=8).
-    ; Actually: entry RSP mod 16 = 8 (ret addr pushed). sub 40 → RSP mod 16 = (8-40) mod 16 = 0. ✓
     sub rsp, 40
     call GetProcessHeap
     add rsp, 40
@@ -156,7 +139,6 @@ FindPrevEntry:
 .loop:
     cmp     ecx, esi
     jge     .notfound
-    ; Compare PID at rax+PE_PID
     cmp     dword [rax + PE_PID], ebx
     je      .found
     add     rax, PROC_ENTRY_SIZE
@@ -176,14 +158,6 @@ FindPrevEntry:
 ;  EnumProcesses
 ;  Re-enumerates all running processes and rebuilds procTable.
 ;  Returns: EAX = number of processes found (0 on error).
-;
-;  Register use:
-;    rbp = heap handle
-;    rbx = hProc (per-process open handle)
-;    rsi = snapshot handle (hSnap) / string src during name copy
-;    rdi = current write ptr (r15 was clobbered risk; using rdi)
-;    r14 = hToken (callee-saved, pushed in prologue)
-;    r15 = spare (saved)
 ; ===========================================================================
 EnumProcesses:
     push    rbp
@@ -192,33 +166,22 @@ EnumProcesses:
     push    rdi
     push    r12
     push    r14
-    push    r15
-    ; Alignment: 7 pushes = 56 bytes. On entry RSP = 16k-8 (after CALL pushed ret addr from 16k-aligned site).
-    ; After 7 pushes: RSP = 16k-8-56 = 16(k-4). Need sub N where N mod 16 = 0 to stay aligned.
-    ; Use N=528 (528/16=33 exactly ✓).
-    sub     rsp, 528
+    sub     rsp, 520
 
-    ; Stack layout (528 bytes, 0..527):
-    ; rsp+  0..31:  shadow space (32 bytes)
-    ; rsp+ 32..55:  arg spill 5th/6th/7th (24 bytes)
-    ; rsp+ 56..359: PROCESSENTRY32A (304 bytes)
-    ; rsp+360..431: PROCESS_MEMORY_COUNTERS (72 bytes)
-    ; rsp+432..463: FILETIMEs x4 (32 bytes)
-    ; rsp+464..527: SID/TOKEN buffer (64 bytes) — hSnap held in r15 register
-    ; Total = 528
+    ; Stack layout (520 bytes):
+    ;   [rsp+  0..31] shadow space (32 bytes)
+    ;   [rsp+ 32..55] arg spill 5th/6th/7th (24 bytes)
+    ;   [rsp+ 56..359] PROCESSENTRY32A (304 bytes)
+    ;   [rsp+360..431] PROCESS_MEMORY_COUNTERS (72 bytes)
+    ;   [rsp+432..463] FILETIMEs x4 (32 bytes)
+    ;   [rsp+464..511] SID/TOKEN buffer (48 bytes)
+    ;   [rsp+512..519] LOC_HSNAP (8 bytes)
 
     %define PE32_FRAME   rsp+56
     %define PMC_FRAME    rsp+360
     %define FT_FRAME     rsp+432
     %define SID_FRAME    rsp+464
-    ; hSnapshot stored in r15 (callee-saved, already pushed)
-
-    ; --- EP1: entry ---
-    xor     ecx, ecx
-    lea     rdx, [rel szEP1]
-    lea     r8,  [rel szEPT]
-    xor     r9d, r9d
-    call    MessageBoxA
+    %define LOC_HSNAP    rsp+512
 
     ; -----------------------------------------------------------------------
     ; 0. Ensure process heap is cached
@@ -226,15 +189,8 @@ EnumProcesses:
     call    EnsureHeap
     mov     rbp, rax                      ; rbp = heap handle
 
-    ; --- EP2: after EnsureHeap ---
-    xor     ecx, ecx
-    lea     rdx, [rel szEP2]
-    lea     r8,  [rel szEPT]
-    xor     r9d, r9d
-    call    MessageBoxA
-
     ; -----------------------------------------------------------------------
-    ; 1. Free the old prevProcTable (from last-last cycle)
+    ; 1. Free old prevProcTable
     ; -----------------------------------------------------------------------
     mov     rax, [rel prevProcTable]
     test    rax, rax
@@ -260,7 +216,7 @@ EnumProcesses:
     cmp     dword [rel procCount], INITIAL_CAP
     jle     .use_init_cap
     mov     edx, [rel procCount]
-    shl     edx, 1                        ; double
+    shl     edx, 1                        ; double capacity
 .use_init_cap:
     mov     [rel procCapacity], edx
 
@@ -274,13 +230,6 @@ EnumProcesses:
     mov     [rel procTable], rax
     mov     rdi, rax                       ; rdi = current write ptr
 
-    ; --- EP3: after HeapAlloc ---
-    xor     ecx, ecx
-    lea     rdx, [rel szEP3]
-    lea     r8,  [rel szEPT]
-    xor     r9d, r9d
-    call    MessageBoxA
-
     ; -----------------------------------------------------------------------
     ; 4. Create Toolhelp32 snapshot
     ; -----------------------------------------------------------------------
@@ -289,15 +238,7 @@ EnumProcesses:
     call    CreateToolhelp32Snapshot
     cmp     rax, -1                        ; INVALID_HANDLE_VALUE
     je      .fail_no_snap
-    mov     r15, rax                       ; r15 = hSnapshot
-    mov     rsi, rax                       ; rsi = hSnapshot
-
-    ; --- EP4: after Snapshot ---
-    xor     ecx, ecx
-    lea     rdx, [rel szEP4]
-    lea     r8,  [rel szEPT]
-    xor     r9d, r9d
-    call    MessageBoxA
+    mov     [LOC_HSNAP], rax               ; Store snapshot handle safely in frame
 
     ; -----------------------------------------------------------------------
     ; 5. Init PROCESSENTRY32A: dwSize = 304
@@ -308,46 +249,16 @@ EnumProcesses:
     ; -----------------------------------------------------------------------
     ; 6. Process32First
     ; -----------------------------------------------------------------------
-    mov     rcx, rsi
+    mov     rcx, [LOC_HSNAP]
     lea     rdx, [PE32_FRAME]
     call    Process32First
     test    eax, eax
     jz      .done_enum                     ; empty system?
 
-    ; --- EP5: Process32First succeeded ---
-    xor     ecx, ecx
-    lea     rdx, [rel szEP5]
-    lea     r8,  [rel szEPT]
-    xor     r9d, r9d
-    call    MessageBoxA
-
     ; -----------------------------------------------------------------------
     ; 7. Main enumeration loop
     ; -----------------------------------------------------------------------
 .proc_loop:
-    ; --- EP6: Show ONCE (only first iteration via procCount==0 check) ---
-    cmp     dword [rel procCount], 0
-    jne     .skip_ep6_probe
-    push    rax
-    push    rcx
-    push    rdx
-    push    r8
-    push    r9
-    push    r10
-    push    r11
-    xor     ecx, ecx
-    lea     rdx, [rel szEP6]
-    lea     r8,  [rel szEPT]
-    xor     r9d, r9d
-    call    MessageBoxA
-    pop     r11
-    pop     r10
-    pop     r9
-    pop     r8
-    pop     rdx
-    pop     rcx
-    pop     rax
-.skip_ep6_probe:
     ; Check capacity
     mov     eax, [rel procCount]
     cmp     eax, [rel procCapacity]
@@ -372,8 +283,7 @@ EnumProcesses:
     lea     rdi, [rax + rbx]
 
 .have_cap:
-    ; Zero out current entry (PROC_ENTRY_SIZE / 8 qwords).
-    ; Use rbx as temp — it's free at this point (hProc not yet opened).
+    ; Zero out current entry (PROC_ENTRY_SIZE / 8 qwords)
     mov     rbx, rdi
     xor     eax, eax
     mov     ecx, PROC_ENTRY_SIZE / 8
@@ -383,50 +293,23 @@ EnumProcesses:
     dec     ecx
     jnz     .zero_loop
 
-    ; --- EP7: After zero_loop (first iter only) ---
-    cmp     dword [rel procCount], 0
-    jne     .skip_ep7_probe
-    push    rax
-    push    rcx
-    push    rdx
-    push    r8
-    push    r9
-    push    r10
-    push    r11
-    xor     ecx, ecx
-    lea     rdx, [rel szEP7]
-    lea     r8,  [rel szEPT]
-    xor     r9d, r9d
-    call    MessageBoxA
-    pop     r11
-    pop     r10
-    pop     r9
-    pop     r8
-    pop     rdx
-    pop     rcx
-    pop     rax
-.skip_ep7_probe:
     ; --- Copy PID ---
     mov     eax, dword [PE32_FRAME + PE32_th32ProcessID]
     mov     dword [rdi + PE_PID], eax
-    mov     r12d, eax                     ; r12 = pid (r12 is callee-saved, preserved across calls)
+    mov     r12d, eax                     ; r12d = pid
 
-    ; --- Copy exe name (up to 260 bytes) using r15 as temp src ptr---
-    lea     r15, [PE32_FRAME + PE32_szExeFile]
-    push    rdi                           ; save rdi (write ptr)
-    lea     rdi, [rdi + PE_NAME]
-    mov     ecx, 260
+    ; --- Copy exe name (up to 260 bytes) using scratch registers ---
+    lea     rax, [PE32_FRAME + PE32_szExeFile]
+    lea     rdx, [rdi + PE_NAME]
 .copy_name:
-    mov     al, [r15]
-    mov     [rdi], al
-    test    al, al
+    mov     cl, [rax]
+    mov     [rdx], cl
+    test    cl, cl
     jz      .copy_name_done
-    inc     r15
-    inc     rdi
-    dec     ecx
-    jnz     .copy_name
+    inc     rax
+    inc     rdx
+    jmp     .copy_name
 .copy_name_done:
-    pop     rdi                           ; restore write ptr
 
     ; -----------------------------------------------------------------------
     ; 8. OpenProcess for memory and time queries
@@ -482,40 +365,41 @@ EnumProcesses:
     ; --- Get username via OpenProcessToken ---
     mov     rcx, rbx                      ; hProc
     mov     edx, TOKEN_QUERY
-    lea     r8,  [SID_FRAME + 40]         ; store hToken at end of SID_FRAME (offset 40)
+    lea     r8,  [SID_FRAME + 40]         ; store hToken at end of SID_FRAME
     call    OpenProcessToken
     test    eax, eax
     jz      .use_default_user
 
-    mov     r14, [SID_FRAME + 40]         ; r14 = hToken — stored at SID_FRAME+40 (past token buffer)
+    mov     r14, [SID_FRAME + 40]         ; r14 = hToken
 
     ; GetTokenInformation(hToken, TokenUser=1, buffer, bufSize, &needed)
     mov     rcx, r14
     mov     edx, TokenUser
     lea     r8,  [SID_FRAME]              ; buffer
-    mov     r9d, 40                       ; buffer size (TOKEN_USER = SID_AND_ATTRIBUTES = 16 + SID itself ≤ 28)
-    lea     rax, [SID_FRAME + 44]         ; &needed (at offset 44, past our 40-byte buffer)
+    mov     r9d, 40                       ; buffer size
+    lea     rax, [SID_FRAME + 44]         ; &needed
     mov     [rsp+32], rax
     call    GetTokenInformation
     test    eax, eax
     jz      .close_token_skip_user
 
     ; LookupAccountSidA(NULL, Sid, name, &cchName, domain, &cchDomain, &peUse)
-    ; SID_AND_ATTRIBUTES.Sid is the first QWORD at SID_FRAME
-    mov     rax, [SID_FRAME]              ; Sid pointer
+    mov     rdx, [SID_FRAME]              ; Sid pointer
+    test    rdx, rdx
+    jz      .close_token_skip_user
+
     xor     ecx, ecx                      ; lpSystemName = NULL
-    mov     rdx, rax                      ; Sid
     lea     r8,  [rdi + PE_USER]          ; lpName (output)
     mov     dword [SID_FRAME + 44], 64    ; cchName = 64
     lea     r9,  [SID_FRAME + 44]         ; pcchName
-    ; 5th arg: domain scratch buffer (SID_FRAME+8, well within 64-byte region)
+    ; 5th arg: domain scratch buffer
     lea     rax, [SID_FRAME + 8]
     mov     [rsp+32], rax
-    ; 6th arg: &cchDomain — use SID_FRAME+48 (safe: within our 64-byte SID region, not at LOC_HSNAP)
+    ; 6th arg: &cchDomain
     mov     dword [SID_FRAME + 48], 32
     lea     rax, [SID_FRAME + 48]
     mov     [rsp+40], rax
-    ; 7th arg: &peUse — use SID_FRAME+52
+    ; 7th arg: &peUse
     lea     rax, [SID_FRAME + 52]
     mov     [rsp+48], rax
     call    LookupAccountSidA
@@ -524,18 +408,16 @@ EnumProcesses:
 
 .close_token_skip_user:
     ; Copy "SYSTEM" as fallback
-    lea     r15, [rel szUnknownUser]
-    lea     r12, [rdi + PE_USER]
-    mov     ecx, 7
+    lea     rax, [rel szUnknownUser]
+    lea     rdx, [rdi + PE_USER]
 .copy_user:
-    mov     al,  [r15]
-    mov     [r12], al
-    inc     r15
-    inc     r12
-    dec     ecx
-    jnz     .copy_user
-    ; reset r12 to pid
-    mov     r12d, dword [rdi + PE_PID]
+    mov     cl, [rax]
+    mov     [rdx], cl
+    test    cl, cl
+    jz      .close_token_done_user
+    inc     rax
+    inc     rdx
+    jmp     .copy_user
 
 .close_token_done_user:
     mov     rcx, r14
@@ -543,18 +425,16 @@ EnumProcesses:
     jmp     .close_proc
 
 .use_default_user:
-    lea     r15, [rel szNA]
-    lea     r12, [rdi + PE_USER]
-    mov     ecx, 4
+    lea     rax, [rel szNA]
+    lea     rdx, [rdi + PE_USER]
 .copy_na:
-    mov     al,  [r15]
-    mov     [r12], al
-    inc     r15
-    inc     r12
-    dec     ecx
-    jnz     .copy_na
-    ; reset r12 to pid
-    mov     r12d, dword [rdi + PE_PID]
+    mov     cl, [rax]
+    mov     [rdx], cl
+    test    cl, cl
+    jz      .close_proc
+    inc     rax
+    inc     rdx
+    jmp     .copy_na
 
 .close_proc:
     mov     rcx, rbx
@@ -566,9 +446,8 @@ EnumProcesses:
     inc     dword [rel procCount]
 
     ; --- Process32Next ---
-    ; rsi holds hSnapshot (callee-saved, untouched by all loop body calls including FindPrevEntry)
     mov     dword [PE32_FRAME + PE32_dwSize], PE32_SIZEOF
-    mov     rcx, rsi                      ; hSnapshot from rsi (preserved by all callees)
+    mov     rcx, [LOC_HSNAP]
     lea     rdx, [PE32_FRAME]
     call    Process32Next
     test    eax, eax
@@ -578,7 +457,7 @@ EnumProcesses:
     ; Done
     ; -----------------------------------------------------------------------
 .done_enum:
-    mov     rcx, rsi                      ; hSnapshot from rsi (always preserved)
+    mov     rcx, [LOC_HSNAP]
     call    CloseHandle
 
     mov     eax, [rel procCount]
@@ -597,8 +476,7 @@ EnumProcesses:
     xor     eax, eax
 
 .epilog:
-    add     rsp, 528
-    pop     r15
+    add     rsp, 520
     pop     r14
     pop     r12
     pop     rdi
@@ -611,3 +489,4 @@ EnumProcesses:
 %undef PMC_FRAME
 %undef FT_FRAME
 %undef SID_FRAME
+%undef LOC_HSNAP
