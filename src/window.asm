@@ -47,6 +47,7 @@ extern InvalidateRect
 extern SetPriorityClass
 extern OpenProcess
 extern CloseHandle
+extern SetWindowTextA
 
 ; ---------------------------------------------------------------------------
 ;  External functions from other modules
@@ -97,6 +98,15 @@ extern szKillFailTitle
 extern szAboutTitle
 extern szAboutText
 extern szMsgBuf
+extern cpuPercent
+extern totalPhysKB
+extern availPhysKB
+extern hCpuVal
+extern hMemVal
+extern szGaugeBuf
+extern szCpuGaugeFmt
+extern szMemGaugeFmt
+extern szStaticClass
 
 ; ---------------------------------------------------------------------------
 ;  Exports
@@ -261,7 +271,7 @@ szWC_T:  db 'WM_CREATE Debug',0
 ; Window initial size
 INIT_WIDTH    equ 900
 INIT_HEIGHT   equ 600
-TOOLBAR_H     equ 32
+TOOLBAR_H     equ 64          ; 64 px: gauges (top 40 px) + search bar (bottom 24 px)
 STATUSBAR_H   equ 22
 
 ; ---------------------------------------------------------------------------
@@ -510,8 +520,77 @@ WndProc:
     mov     rcx, [rel hSearchEdit]
     mov     edx, 0x1501               ; EM_SETCUEBANNER
     mov     r8d, 0
-    lea     r9,  [rel szFilterPH]      ; (ANSI – ideally Unicode but placeholder may show as-is)
+    lea     r9,  [rel szFilterPH]
     call    SendMessageA
+
+    ; --- Create CPU gauge static (top-left, two lines: "39%\r\nCPU") ---
+    %define SS_CENTER  0x01
+    %define SS_NOPREFIX 0x80
+    xor     ecx, ecx
+    lea     rdx, [rel szStaticClass]
+    xor     r8d, r8d
+    mov     r9d, (WS_CHILD | WS_VISIBLE | SS_CENTER | SS_NOPREFIX)
+    mov     qword [rsp+32], 8          ; x
+    mov     qword [rsp+40], 2          ; y
+    mov     qword [rsp+48], 100        ; w
+    mov     qword [rsp+56], 40         ; h
+    mov     [rsp+64], rbp
+    mov     qword [rsp+72], 0
+    mov     rax, [rel hInstance]
+    mov     [rsp+80], rax
+    mov     qword [rsp+88], 0
+    call    CreateWindowExA
+    mov     [rel hCpuVal], rax
+    ; Font on CPU gauge
+    mov     rcx, rax
+    mov     edx, 0x0030               ; WM_SETFONT
+    mov     r8,  [rel hFont]
+    mov     r9d, 1
+    call    SendMessageA
+
+    ; --- Create Memory gauge static ---
+    xor     ecx, ecx
+    lea     rdx, [rel szStaticClass]
+    xor     r8d, r8d
+    mov     r9d, (WS_CHILD | WS_VISIBLE | SS_CENTER | SS_NOPREFIX)
+    mov     qword [rsp+32], 118        ; x (8 + 100 + 10 separator)
+    mov     qword [rsp+40], 2          ; y
+    mov     qword [rsp+48], 110        ; w
+    mov     qword [rsp+56], 40         ; h
+    mov     [rsp+64], rbp
+    mov     qword [rsp+72], 0
+    mov     rax, [rel hInstance]
+    mov     [rsp+80], rax
+    mov     qword [rsp+88], 0
+    call    CreateWindowExA
+    mov     [rel hMemVal], rax
+    ; Font on Mem gauge
+    mov     rcx, rax
+    mov     edx, 0x0030
+    mov     r8,  [rel hFont]
+    mov     r9d, 1
+    call    SendMessageA
+
+    ; --- Initial gauge text (0% until first cycle) ---
+    mov     rcx, [rel hCpuVal]
+    lea     rdx, [rel szCpuGaugeFmt+3]  ; point past '%d' to "%%\r\nCPU" skeleton
+    ; simpler: just use a literal zero string
+    ; use wsprintfA to format "0%\r\nCPU" into szGaugeBuf
+    lea     rcx, [rel szGaugeBuf]
+    lea     rdx, [rel szCpuGaugeFmt]
+    xor     r8d, r8d                   ; 0%
+    call    wsprintfA
+    mov     rcx, [rel hCpuVal]
+    lea     rdx, [rel szGaugeBuf]
+    call    SetWindowTextA
+
+    lea     rcx, [rel szGaugeBuf]
+    lea     rdx, [rel szMemGaugeFmt]
+    xor     r8d, r8d
+    call    wsprintfA
+    mov     rcx, [rel hMemVal]
+    lea     rdx, [rel szGaugeBuf]
+    call    SetWindowTextA
 
     ; --- Create status bar ---
     xor     ecx, ecx
@@ -670,13 +749,31 @@ WndProc:
     mov     [rel clientWidth],  ecx
     mov     [rel clientHeight], edx
 
-    ; Edit box: top-left, full toolbar height, 220px wide
+    ; Edit box: pinned at bottom of toolbar, left side, 220px wide
     mov     rcx, [rel hSearchEdit]
     xor     edx, edx                   ; x = 0
-    xor     r8d, r8d                   ; y = 0
-    mov     r9d, 220                   ; w = 220
-    mov     dword [rsp+32], TOOLBAR_H  ; h = TOOLBAR_H
-    mov     dword [rsp+40], 1          ; bRepaint
+    mov     r8d, (TOOLBAR_H - 28)      ; y = bottom of toolbar (64-28=36 -> vertically centred)
+    mov     r9d, 240                   ; w = 240
+    mov     dword [rsp+32], 26         ; h = 26 (tight single-line edit)
+    mov     dword [rsp+40], 1
+    call    MoveWindow
+
+    ; CPU gauge: top-left
+    mov     rcx, [rel hCpuVal]
+    mov     edx, 8
+    mov     r8d, 2
+    mov     r9d, 100
+    mov     dword [rsp+32], (TOOLBAR_H - 6)
+    mov     dword [rsp+40], 1
+    call    MoveWindow
+
+    ; Memory gauge: right of CPU gauge
+    mov     rcx, [rel hMemVal]
+    mov     edx, 118
+    mov     r8d, 2
+    mov     r9d, 110
+    mov     dword [rsp+32], (TOOLBAR_H - 6)
+    mov     dword [rsp+40], 1
     call    MoveWindow
 
     ; ListView: below toolbar, above status bar
@@ -722,6 +819,42 @@ WndProc:
 
     call    EnumProcesses
     call    RefreshListView
+
+    ; --- Update gauge statics ---
+    ; CPU%
+    lea     rcx, [rel szGaugeBuf]
+    lea     rdx, [rel szCpuGaugeFmt]
+    mov     r8d, [rel cpuPercent]       ; global updated by UpdateCpuUsage in RefreshListView
+    call    wsprintfA
+    mov     rcx, [rel hCpuVal]
+    lea     rdx, [rel szGaugeBuf]
+    call    SetWindowTextA
+
+    ; Memory% = (totalPhysKB - availPhysKB) * 100 / totalPhysKB
+    mov     rax, [rel totalPhysKB]
+    test    rax, rax
+    jz      .gauge_mem_zero
+    mov     rcx, rax                    ; rcx = totalPhysKB (save for divide)
+    sub     rax, [rel availPhysKB]      ; rax = usedKB
+    imul    rax, 100                    ; rax = usedKB * 100
+    xor     rdx, rdx
+    div     rcx                         ; rax = mem% (usedKB*100 / totalPhysKB)
+    cmp     rax, 100
+    jbe     .mem_ok
+    mov     rax, 100
+.mem_ok:
+    mov     r8d, eax
+    jmp     .gauge_mem_fmt
+.gauge_mem_zero:
+    xor     r8d, r8d
+.gauge_mem_fmt:
+    lea     rcx, [rel szGaugeBuf]
+    lea     rdx, [rel szMemGaugeFmt]
+    call    wsprintfA
+    mov     rcx, [rel hMemVal]
+    lea     rdx, [rel szGaugeBuf]
+    call    SetWindowTextA
+
     xor     eax, eax
     jmp     .epilog
 

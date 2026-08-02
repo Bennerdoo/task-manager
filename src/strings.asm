@@ -291,6 +291,19 @@ szColUser:          db 'User', 0
 global szSearchHint
 szSearchHint:       db 'Filter processes...', 0
 
+; --- Gauge format strings (multi-line static: value \r\n label) ---
+global szCpuGaugeFmt
+szCpuGaugeFmt:      db '%d%%', 13, 10, 'CPU', 0
+
+global szMemGaugeFmt
+szMemGaugeFmt:      db '%d%%', 13, 10, 'Mem', 0
+
+global szStaticClass
+szStaticClass:      db 'STATIC', 0
+
+global szGaugeBuf
+szGaugeBuf:         times 32 db 0
+
 ; --- Status bar format strings ---
 global szStatusFmt
 szStatusFmt:        db '%d processes  |  CPU: %d%%  |  RAM: %d MB / %d MB', 0
@@ -409,6 +422,12 @@ hAccentBrush:       resq 1    ; HBRUSH accent
 
 global hFont
 hFont:              resq 1    ; custom HFONT
+
+global hCpuVal
+hCpuVal:            resq 1    ; gauge static for CPU%
+
+global hMemVal
+hMemVal:            resq 1    ; gauge static for Memory%
 
 global hPopupMenu
 hPopupMenu:         resq 1    ; context menu HMENU
