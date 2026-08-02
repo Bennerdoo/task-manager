@@ -228,7 +228,7 @@ default rel
 ; --- PROC_ENTRY structure offsets ---
 %define PROC_ENTRY_PID       0     ; DWORD  process ID
 %define PROC_ENTRY_SESSID    4     ; DWORD  session ID (unused atm)
-%define PROC_ENTRY_MEMKB     8     ; DWORD  working set KB
+%define PROC_ENTRY_MEMKB     8     ; DWORD  working set MB
 %define PROC_ENTRY_FLAGS     12    ; DWORD  bit0=system, bit1=protected
 %define PROC_ENTRY_CPUTIME   16    ; QWORD  kernel+user FILETIME (for delta)
 %define PROC_ENTRY_CPUPCT    24    ; DWORD  last computed CPU% * 10 (fixed-point)
@@ -284,7 +284,7 @@ szColIdx:           db '#', 0
 szColPid:           db 'PID', 0
 szColName:          db 'Process Name', 0
 szColCpu:           db 'CPU %', 0
-szColMem:           db 'Memory (KB)', 0
+szColMem:           db 'Memory (MB)', 0
 szColUser:          db 'User', 0
 
 ; --- Toolbar / Search ---

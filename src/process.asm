@@ -340,11 +340,12 @@ EnumProcesses:
     call    GetProcessMemoryInfo
     test    eax, eax
     jz      .skip_mem
-    ; WorkingSetSize in bytes → KB
+    ; WorkingSetSize in bytes → MB
     mov     rax, [PMC_FRAME + PMC_WorkingSetSize]
-    shr     rax, 10
+    shr     rax, 20                  ; bytes → MB (÷1048576)
     mov     dword [rdi + PE_MEMKB], eax
 .skip_mem:
+
 
     ; --- GetProcessTimes ---
     mov     rcx, rbx
