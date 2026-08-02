@@ -104,9 +104,9 @@ extern availPhysKB
 extern hCpuVal
 extern hMemVal
 extern szGaugeBuf
-extern szCpuGaugeFmt
-extern szMemGaugeFmt
-extern szStaticClass
+extern szCpuColFmt
+extern szMemColFmt
+extern lvcBuf
 
 ; ---------------------------------------------------------------------------
 ;  Exports
@@ -178,6 +178,13 @@ global WndProc
 %define COLOR_ACCENT          0x00FFA658
 %define COLOR_HEADER_BG       0x002D2621
 %define TRANSPARENT           1
+; --- ListView column indices (must match strings.asm) ---
+%define COL_IDX              0
+%define COL_PID              1
+%define COL_NAME             2
+%define COL_CPU              3
+%define COL_MEM              4
+%define COL_USER             5
 %define SM_CXSCREEN           0
 %define SM_CYSCREEN           1
 %define FW_NORMAL             400
@@ -271,8 +278,18 @@ szWC_T:  db 'WM_CREATE Debug',0
 ; Window initial size
 INIT_WIDTH    equ 900
 INIT_HEIGHT   equ 600
-TOOLBAR_H     equ 64          ; 64 px: gauges (top 40 px) + search bar (bottom 24 px)
+TOOLBAR_H     equ 32
 STATUSBAR_H   equ 22
+
+; LVCOLUMNA offsets (x64 struct)
+%define LVCF_TEXT       0x0004
+%define LVC_mask        0
+%define LVC_fmt         4
+%define LVC_cx          8
+%define LVC_pszText     16     ; pointer at offset 16 (4 bytes pad after cx)
+%define LVC_cchTextMax  24
+%define LVC_SIZEOF      40
+%define LVM_SETCOLUMNA  0x101A ; LVM_FIRST + 26
 
 ; ---------------------------------------------------------------------------
 section .text
@@ -523,75 +540,6 @@ WndProc:
     lea     r9,  [rel szFilterPH]
     call    SendMessageA
 
-    ; --- Create CPU gauge static (top-left, two lines: "39%\r\nCPU") ---
-    %define SS_CENTER  0x01
-    %define SS_NOPREFIX 0x80
-    xor     ecx, ecx
-    lea     rdx, [rel szStaticClass]
-    xor     r8d, r8d
-    mov     r9d, (WS_CHILD | WS_VISIBLE | SS_CENTER | SS_NOPREFIX)
-    mov     qword [rsp+32], 8          ; x
-    mov     qword [rsp+40], 2          ; y
-    mov     qword [rsp+48], 100        ; w
-    mov     qword [rsp+56], 40         ; h
-    mov     [rsp+64], rbp
-    mov     qword [rsp+72], 0
-    mov     rax, [rel hInstance]
-    mov     [rsp+80], rax
-    mov     qword [rsp+88], 0
-    call    CreateWindowExA
-    mov     [rel hCpuVal], rax
-    ; Font on CPU gauge
-    mov     rcx, rax
-    mov     edx, 0x0030               ; WM_SETFONT
-    mov     r8,  [rel hFont]
-    mov     r9d, 1
-    call    SendMessageA
-
-    ; --- Create Memory gauge static ---
-    xor     ecx, ecx
-    lea     rdx, [rel szStaticClass]
-    xor     r8d, r8d
-    mov     r9d, (WS_CHILD | WS_VISIBLE | SS_CENTER | SS_NOPREFIX)
-    mov     qword [rsp+32], 118        ; x (8 + 100 + 10 separator)
-    mov     qword [rsp+40], 2          ; y
-    mov     qword [rsp+48], 110        ; w
-    mov     qword [rsp+56], 40         ; h
-    mov     [rsp+64], rbp
-    mov     qword [rsp+72], 0
-    mov     rax, [rel hInstance]
-    mov     [rsp+80], rax
-    mov     qword [rsp+88], 0
-    call    CreateWindowExA
-    mov     [rel hMemVal], rax
-    ; Font on Mem gauge
-    mov     rcx, rax
-    mov     edx, 0x0030
-    mov     r8,  [rel hFont]
-    mov     r9d, 1
-    call    SendMessageA
-
-    ; --- Initial gauge text (0% until first cycle) ---
-    mov     rcx, [rel hCpuVal]
-    lea     rdx, [rel szCpuGaugeFmt+3]  ; point past '%d' to "%%\r\nCPU" skeleton
-    ; simpler: just use a literal zero string
-    ; use wsprintfA to format "0%\r\nCPU" into szGaugeBuf
-    lea     rcx, [rel szGaugeBuf]
-    lea     rdx, [rel szCpuGaugeFmt]
-    xor     r8d, r8d                   ; 0%
-    call    wsprintfA
-    mov     rcx, [rel hCpuVal]
-    lea     rdx, [rel szGaugeBuf]
-    call    SetWindowTextA
-
-    lea     rcx, [rel szGaugeBuf]
-    lea     rdx, [rel szMemGaugeFmt]
-    xor     r8d, r8d
-    call    wsprintfA
-    mov     rcx, [rel hMemVal]
-    lea     rdx, [rel szGaugeBuf]
-    call    SetWindowTextA
-
     ; --- Create status bar ---
     xor     ecx, ecx
     lea     rdx, [rel szStaticBar]
@@ -749,30 +697,12 @@ WndProc:
     mov     [rel clientWidth],  ecx
     mov     [rel clientHeight], edx
 
-    ; Edit box: pinned at bottom of toolbar, left side, 220px wide
+    ; Edit box: top-left, full toolbar height, 220px wide
     mov     rcx, [rel hSearchEdit]
     xor     edx, edx                   ; x = 0
-    mov     r8d, (TOOLBAR_H - 28)      ; y = bottom of toolbar (64-28=36 -> vertically centred)
-    mov     r9d, 240                   ; w = 240
-    mov     dword [rsp+32], 26         ; h = 26 (tight single-line edit)
-    mov     dword [rsp+40], 1
-    call    MoveWindow
-
-    ; CPU gauge: top-left
-    mov     rcx, [rel hCpuVal]
-    mov     edx, 8
-    mov     r8d, 2
-    mov     r9d, 100
-    mov     dword [rsp+32], (TOOLBAR_H - 6)
-    mov     dword [rsp+40], 1
-    call    MoveWindow
-
-    ; Memory gauge: right of CPU gauge
-    mov     rcx, [rel hMemVal]
-    mov     edx, 118
-    mov     r8d, 2
-    mov     r9d, 110
-    mov     dword [rsp+32], (TOOLBAR_H - 6)
+    xor     r8d, r8d                   ; y = 0
+    mov     r9d, 220                   ; w = 220
+    mov     dword [rsp+32], TOOLBAR_H  ; h = TOOLBAR_H
     mov     dword [rsp+40], 1
     call    MoveWindow
 
@@ -820,40 +750,52 @@ WndProc:
     call    EnumProcesses
     call    RefreshListView
 
-    ; --- Update gauge statics ---
-    ; CPU%
+    ; --- Update column headers with live CPU% and Memory% ---
+    ; Use szGaugeBuf as temp, lvcBuf as LVCOLUMNA struct (zeroed via bss)
+    ; Column 3 (CPU%): format "CPU %  NN%" into header
     lea     rcx, [rel szGaugeBuf]
-    lea     rdx, [rel szCpuGaugeFmt]
-    mov     r8d, [rel cpuPercent]       ; global updated by UpdateCpuUsage in RefreshListView
+    lea     rdx, [rel szCpuColFmt]
+    mov     r8d, [rel cpuPercent]
     call    wsprintfA
-    mov     rcx, [rel hCpuVal]
-    lea     rdx, [rel szGaugeBuf]
-    call    SetWindowTextA
+    ; Set up LVCOLUMNA: only mask + pszText
+    mov     dword [rel lvcBuf + LVC_mask], LVCF_TEXT
+    lea     rax, [rel szGaugeBuf]
+    mov     [rel lvcBuf + LVC_pszText], rax
+    mov     rcx, [rel hListView]
+    mov     edx, LVM_SETCOLUMNA
+    mov     r8d, COL_CPU               ; column index 3
+    lea     r9, [rel lvcBuf]
+    call    SendMessageA
 
-    ; Memory% = (totalPhysKB - availPhysKB) * 100 / totalPhysKB
+    ; Column 4 (Memory%): compute mem% and format
     mov     rax, [rel totalPhysKB]
     test    rax, rax
-    jz      .gauge_mem_zero
-    mov     rcx, rax                    ; rcx = totalPhysKB (save for divide)
-    sub     rax, [rel availPhysKB]      ; rax = usedKB
-    imul    rax, 100                    ; rax = usedKB * 100
+    jz      .col_mem_zero
+    mov     rcx, rax                   ; rcx = totalPhysKB
+    sub     rax, [rel availPhysKB]     ; rax = usedKB
+    imul    rax, 100
     xor     rdx, rdx
-    div     rcx                         ; rax = mem% (usedKB*100 / totalPhysKB)
+    div     rcx                        ; rax = mem%
     cmp     rax, 100
-    jbe     .mem_ok
+    jbe     .col_mem_ok
     mov     rax, 100
-.mem_ok:
+.col_mem_ok:
     mov     r8d, eax
-    jmp     .gauge_mem_fmt
-.gauge_mem_zero:
+    jmp     .col_mem_fmt
+.col_mem_zero:
     xor     r8d, r8d
-.gauge_mem_fmt:
+.col_mem_fmt:
     lea     rcx, [rel szGaugeBuf]
-    lea     rdx, [rel szMemGaugeFmt]
+    lea     rdx, [rel szMemColFmt]
     call    wsprintfA
-    mov     rcx, [rel hMemVal]
-    lea     rdx, [rel szGaugeBuf]
-    call    SetWindowTextA
+    mov     dword [rel lvcBuf + LVC_mask], LVCF_TEXT
+    lea     rax, [rel szGaugeBuf]
+    mov     [rel lvcBuf + LVC_pszText], rax
+    mov     rcx, [rel hListView]
+    mov     edx, LVM_SETCOLUMNA
+    mov     r8d, COL_MEM               ; column index 4
+    lea     r9, [rel lvcBuf]
+    call    SendMessageA
 
     xor     eax, eax
     jmp     .epilog

@@ -292,14 +292,11 @@ global szSearchHint
 szSearchHint:       db 'Filter processes...', 0
 
 ; --- Gauge format strings (multi-line static: value \r\n label) ---
-global szCpuGaugeFmt
-szCpuGaugeFmt:      db '%d%%', 13, 10, 'CPU', 0
+global szCpuColFmt
+szCpuColFmt:        db 'CPU %%  %d%%', 0     ; -> "CPU %  39%"
 
-global szMemGaugeFmt
-szMemGaugeFmt:      db '%d%%', 13, 10, 'Mem', 0
-
-global szStaticClass
-szStaticClass:      db 'STATIC', 0
+global szMemColFmt
+szMemColFmt:        db 'Memory  %d%%', 0     ; -> "Memory  90%"
 
 global szGaugeBuf
 szGaugeBuf:         times 32 db 0
@@ -424,10 +421,13 @@ global hFont
 hFont:              resq 1    ; custom HFONT
 
 global hCpuVal
-hCpuVal:            resq 1    ; gauge static for CPU%
+hCpuVal:            resq 1    ; (unused, kept for compat)
 
 global hMemVal
-hMemVal:            resq 1    ; gauge static for Memory%
+hMemVal:            resq 1    ; (unused, kept for compat)
+
+global lvcBuf
+lvcBuf:             resb 48   ; LVCOLUMNA struct for LVM_SETCOLUMNA calls
 
 global hPopupMenu
 hPopupMenu:         resq 1    ; context menu HMENU
