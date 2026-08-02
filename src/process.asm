@@ -45,7 +45,8 @@ global EnumProcesses
 %define TH32CS_SNAPPROCESS    0x00000002
 %define PROCESS_QUERY_INFO    0x00000400
 %define PROCESS_VM_READ       0x00000010
-%define PROCESS_QUERYINFO_VM  0x00000410   ; PROCESS_QUERY_INFORMATION | VM_READ
+%define PROCESS_QUERYINFO_VM  0x00000410   ; QUERY_INFORMATION | VM_READ
+%define PROCESS_QUERY_LIMITED 0x00001000   ; sufficient for mem+time queries
 %define TOKEN_QUERY           0x00000008
 %define TokenUser             1
 %define HEAP_ZERO_MEMORY      0x00000008
@@ -314,12 +315,20 @@ EnumProcesses:
     ; -----------------------------------------------------------------------
     ; 8. OpenProcess for memory and time queries
     ; -----------------------------------------------------------------------
+    ; Try full rights first; fall back to LIMITED for protected/system procs
     mov     ecx, PROCESS_QUERYINFO_VM
-    xor     edx, edx                      ; FALSE (bInheritHandle)
-    mov     r8d, r12d                     ; pid
+    xor     edx, edx
+    mov     r8d, r12d
+    call    OpenProcess
+    test    rax, rax
+    jnz     .have_proc
+    mov     ecx, PROCESS_QUERY_LIMITED
+    xor     edx, edx
+    mov     r8d, r12d
     call    OpenProcess
     test    rax, rax
     jz      .skip_stats
+.have_proc:
     mov     rbx, rax                      ; rbx = hProc
 
     ; --- GetProcessMemoryInfo ---

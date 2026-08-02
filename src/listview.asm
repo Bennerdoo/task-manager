@@ -17,6 +17,7 @@ extern SetBkColor
 extern SetTextColor
 extern CreateSolidBrush
 extern GetStockObject
+extern InvalidateRect
 
 ; ---------------------------------------------------------------------------
 ;  Globals (from strings.asm)
@@ -61,6 +62,7 @@ global SortCompareProc
 ; ---------------------------------------------------------------------------
 ;  Constants
 ; ---------------------------------------------------------------------------
+%define WM_SETREDRAW         0x000B
 %define LVM_FIRST            0x1000
 %define LVM_INSERTCOLUMNA    (LVM_FIRST + 27)
 %define LVM_INSERTITEMA      (LVM_FIRST + 7)
@@ -75,6 +77,7 @@ global SortCompareProc
 %define LVM_GETITEMA         (LVM_FIRST + 5)
 %define LVM_SORTITEMSEX      (LVM_FIRST + 81)
 %define LVM_ENSUREVISIBLE    (LVM_FIRST + 19)
+%define LVM_GETTOPINDEX      (LVM_FIRST + 39)
 
 %define LVS_EX_FULLROWSELECT 0x00000020
 %define LVS_EX_GRIDLINES     0x00000001
@@ -195,11 +198,11 @@ InitListView:
     mov     r9d, COLOR_TEXT
     call    SendMessageA
 
-    ; --- Text background color (CLR_NONE = use item background) ---
+    ; --- Text background color (COLOR_BG = dark background) ---
     mov     rcx, rbx
     mov     edx, LVM_SETTEXTBKCOLOR
     xor     r8d, r8d
-    mov     r9d, CLR_NONE
+    mov     r9d, COLOR_BG
     call    SendMessageA
 
     ; --- Insert columns ---
@@ -299,14 +302,15 @@ RefreshListView:
     push    rsi
     push    rdi
     push    r15
-    ; 5 pushes: 40 + 8 ret = 48. sub 160: 160 mod 16 = 0. RSP shift = 208, 208/16=13 ✓
-    sub     rsp, 160
+    push    r14
+    ; 6 pushes: 48 + 8 ret = 56. sub 152: 152 mod 16 = 8 → RSP shift = 208, 208/16=13 ✓
+    sub     rsp, 152
 
     ; Stack layout:
     ;   [rsp+  0] shadow (32)
     ;   [rsp+ 32] arg spill (32)
     ;   [rsp+ 64] LVITEMA (48 bytes) → up to [rsp+111]
-    ;   [rsp+112] text scratch buffer (48 bytes)
+    ;   [rsp+112] text scratch buffer (40 bytes)
     %define ITEM_FRAME  rsp+64
     %define TXT_FRAME   rsp+112
 
@@ -315,6 +319,21 @@ RefreshListView:
     ; --- Update CPU and memory stats ---
     call    UpdateCpuUsage
     call    UpdateMemoryStats
+
+    ; --- Save scroll position before clearing ---
+    mov     rcx, rbp
+    mov     edx, LVM_GETTOPINDEX
+    xor     r8d, r8d
+    xor     r9d, r9d
+    call    SendMessageA
+    mov     r14d, eax                    ; r14d = top visible item index
+
+    ; --- Freeze redraws to avoid blink during delete+repopulate ---
+    mov     rcx, rbp
+    mov     edx, WM_SETREDRAW
+    xor     r8d, r8d               ; FALSE = stop drawing
+    xor     r9d, r9d
+    call    SendMessageA
 
     ; --- Delete all items ---
     mov     rcx, rbp
@@ -482,15 +501,31 @@ RefreshListView:
     jl      .row_loop
 
 .after_rows:
+    ; --- Re-enable redraws and force one clean repaint ---
+    mov     rcx, rbp
+    mov     edx, WM_SETREDRAW
+    mov     r8d, 1                 ; TRUE = resume drawing
+    xor     r9d, r9d
+    call    SendMessageA
+
+    ; InvalidateRect(hListView, NULL, FALSE) → schedule a clean repaint
+    mov     rcx, rbp
+    xor     edx, edx               ; lpRect = NULL (entire client)
+    xor     r8d, r8d               ; bErase = FALSE
+    call    InvalidateRect
+
+    ; --- Restore scroll position ---
+    test    r14d, r14d
+    jz      .scroll_done           ; was at top, nothing to restore
+    mov     rcx, rbp
+    mov     edx, LVM_ENSUREVISIBLE
+    mov     r8d, r14d              ; iItem = saved top index
+    mov     r9d, 1                 ; bPartialOK = TRUE
+    call    SendMessageA
+.scroll_done:
+
     ; --- Update status bar ---
     ; Format: "NNN processes  |  CPU: NN%  |  RAM: XXXX MB / YYYY MB"
-    mov     eax, [rel cpuPercent]
-    mov     r8d,  eax                    ; cpu %
-    mov     r9,   [rel totalPhysKB]
-    shr     r9,   10                     ; → MB
-    lea     rax,  [rel szStatusBuf]
-    push    rax                          ; 5th arg = buffer (actually this is wrong; wsprintfA uses rcx=buf)
-
     ; wsprintfA(szStatusBuf, szStatusFmt, procCount, cpuPercent, availMB, totalMB)
     lea     rcx, [rel szStatusBuf]
     lea     rdx, [rel szStatusFmt]
@@ -511,7 +546,8 @@ RefreshListView:
     lea     r9, [rel szStatusBuf]
     call    SendMessageA
 
-    add     rsp, 160
+    add     rsp, 152
+    pop     r14
     pop     r15
     pop     rdi
     pop     rsi
@@ -659,23 +695,32 @@ SubstrMatchI:
 SortCompareProc:
     push    rbx
     push    rsi
+    push    rdi
+    ; 3 pushes (24) + 8 ret = 32. sub 32: RSP shift = 64, 64/16=4 OK
+    sub     rsp, 32             ; shadow space required before any CALL
 
-    mov     rbx, rcx          ; entry1
-    mov     rsi, rdx          ; entry2
-    mov     ecx, r8d          ; sort column
+    mov     rbx, rcx            ; entry1 (PROC_ENTRY*)
+    mov     rsi, rdx            ; entry2 (PROC_ENTRY*)
+    mov     edi, r8d            ; sort column (saved in rdi across calls)
+
+    ; NULL guard
+    test    rbx, rbx
+    jz      .cmp_equal
+    test    rsi, rsi
+    jz      .cmp_equal
 
     ; Switch on sort column
-    cmp     ecx, 1            ; COL_PID
+    cmp     edi, 1
     je      .sort_pid
-    cmp     ecx, 2            ; COL_NAME
+    cmp     edi, 2
     je      .sort_name
-    cmp     ecx, 3            ; COL_CPU
+    cmp     edi, 3
     je      .sort_cpu
-    cmp     ecx, 4            ; COL_MEM
+    cmp     edi, 4
     je      .sort_mem
-    cmp     ecx, 5            ; COL_USER
+    cmp     edi, 5
     je      .sort_user
-    ; default: sort by index (no-op, just compare addr)
+.cmp_equal:
     xor     eax, eax
     jmp     .apply_dir
 
@@ -687,8 +732,13 @@ SortCompareProc:
 .sort_cpu:
     mov     rax, [rbx + PE_CPUPCT]
     sub     rax, [rsi + PE_CPUPCT]
-    sar     rax, 32
-    mov     eax, eax
+    test    rax, rax
+    jz      .apply_dir
+    js      .cpu_neg
+    mov     eax, 1
+    jmp     .apply_dir
+.cpu_neg:
+    mov     eax, -1
     jmp     .apply_dir
 
 .sort_mem:
@@ -715,6 +765,8 @@ SortCompareProc:
     neg     eax
 
 .done_sort:
+    add     rsp, 32
+    pop     rdi
     pop     rsi
     pop     rbx
     ret

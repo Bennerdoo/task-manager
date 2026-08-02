@@ -458,13 +458,6 @@ WndProc:
     call    CreateFontA
     mov     [rel hFont], rax
 
-    ; --- DBG WC-A ---
-    xor     ecx, ecx
-    lea     rdx, [rel szWC_A]
-    lea     r8,  [rel szWC_T]
-    xor     r9d, r9d
-    call    MessageBoxA
-
     ; --- Create ListView ---
     mov     ecx, WS_EX_CLIENTEDGE
     lea     rdx, [rel szLVStyle]
@@ -481,13 +474,6 @@ WndProc:
     mov     qword [rsp+88], 0
     call    CreateWindowExA
     mov     [rel hListView], rax
-
-    ; --- DBG WC-B ---
-    xor     ecx, ecx
-    lea     rdx, [rel szWC_B]
-    lea     r8,  [rel szWC_T]
-    xor     r9d, r9d
-    call    MessageBoxA
 
     ; Set font on listview
     mov     rcx, rax
@@ -549,13 +535,6 @@ WndProc:
     mov     r9d, 1
     call    SendMessageA
 
-    ; --- DBG WC-C ---
-    xor     ecx, ecx
-    lea     rdx, [rel szWC_C]
-    lea     r8,  [rel szWC_T]
-    xor     r9d, r9d
-    call    MessageBoxA
-
     ; --- Create context menu ---
     call    CreatePopupMenu
     mov     [rel hPopupMenu], rax
@@ -609,47 +588,12 @@ WndProc:
     lea     r9, [rel szAboutMenuText]
     call    AppendMenuA
 
-    ; --- DBG WC-D ---
-    xor     ecx, ecx
-    lea     rdx, [rel szWC_D]
-    lea     r8,  [rel szWC_T]
-    xor     r9d, r9d
-    call    MessageBoxA
-
-    ; --- DBG WC-E ---
-    xor     ecx, ecx
-    lea     rdx, [rel szWC_E]
-    lea     r8,  [rel szWC_T]
-    xor     r9d, r9d
-    call    MessageBoxA
-
     ; --- Load kernel driver ---
     call    LoadKernelDriver
 
-    ; --- DBG WC-F ---
-    xor     ecx, ecx
-    lea     rdx, [rel szWC_F]
-    lea     r8,  [rel szWC_T]
-    xor     r9d, r9d
-    call    MessageBoxA
-
-    ; --- DBG WC-G ---
-    xor     ecx, ecx
-    lea     rdx, [rel szWC_G]
-    lea     r8,  [rel szWC_T]
-    xor     r9d, r9d
-    call    MessageBoxA
-
-    ; --- Initial process enumeration --- SKIPPED FOR TESTING ---
-    ; call    EnumProcesses
-    ; call    RefreshListView
-
-    ; --- DBG WC-H ---
-    xor     ecx, ecx
-    lea     rdx, [rel szWC_H]
-    lea     r8,  [rel szWC_T]
-    xor     r9d, r9d
-    call    MessageBoxA
+    ; --- Initial process enumeration ---
+    call    EnumProcesses
+    call    RefreshListView
 
     ; --- Set minimum window size ---
     mov     dword [rel minWidth],  700
@@ -661,13 +605,6 @@ WndProc:
     mov     r8d, REFRESH_INTERVAL_MS
     xor     r9d, r9d
     call    SetTimer
-
-    ; --- DBG WC-I ---
-    xor     ecx, ecx
-    lea     rdx, [rel szWC_I]
-    lea     r8,  [rel szWC_T]
-    xor     r9d, r9d
-    call    MessageBoxA
 
     xor     eax, eax               ; return 0 = handled
     jmp     .epilog
@@ -783,8 +720,8 @@ WndProc:
     lea     r9, [rel searchFilter]
     call    SendMessageA
 
-    ; call    EnumProcesses     ; SKIPPED FOR TESTING
-    ; call    RefreshListView   ; SKIPPED FOR TESTING
+    call    EnumProcesses
+    call    RefreshListView
     xor     eax, eax
     jmp     .epilog
 
