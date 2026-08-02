@@ -167,22 +167,23 @@ EnumProcesses:
     push    rdi
     push    r12
     push    r14
-    sub     rsp, 520
+    push    r13              ; used for snapshot handle (hSnap)
+    ; 7 pushes (56) + 8 ret = 64. sub 528: 64+528=592=37x16 OK
+    sub     rsp, 528
 
-    ; Stack layout (520 bytes):
+    ; Stack layout (528 bytes):
     ;   [rsp+  0..31] shadow space (32 bytes)
     ;   [rsp+ 32..55] arg spill 5th/6th/7th (24 bytes)
     ;   [rsp+ 56..359] PROCESSENTRY32A (304 bytes)
     ;   [rsp+360..431] PROCESS_MEMORY_COUNTERS (72 bytes)
     ;   [rsp+432..463] FILETIMEs x4 (32 bytes)
-    ;   [rsp+464..511] SID/TOKEN buffer (48 bytes)
-    ;   [rsp+512..519] LOC_HSNAP (8 bytes)
+    ;   [rsp+464..527] SID/TOKEN buffer (64 bytes, needs all 64)
+    ;   hSnap stored in r13 (non-volatile) — avoids stack overlap
 
     %define PE32_FRAME   rsp+56
     %define PMC_FRAME    rsp+360
     %define FT_FRAME     rsp+432
     %define SID_FRAME    rsp+464
-    %define LOC_HSNAP    rsp+512
 
     ; -----------------------------------------------------------------------
     ; 0. Ensure process heap is cached
@@ -239,7 +240,7 @@ EnumProcesses:
     call    CreateToolhelp32Snapshot
     cmp     rax, -1                        ; INVALID_HANDLE_VALUE
     je      .fail_no_snap
-    mov     [LOC_HSNAP], rax               ; Store snapshot handle safely in frame
+    mov     r13, rax                       ; r13 = snapshot handle (non-volatile)
 
     ; -----------------------------------------------------------------------
     ; 5. Init PROCESSENTRY32A: dwSize = 304
@@ -250,7 +251,7 @@ EnumProcesses:
     ; -----------------------------------------------------------------------
     ; 6. Process32First
     ; -----------------------------------------------------------------------
-    mov     rcx, [LOC_HSNAP]
+    mov     rcx, r13
     lea     rdx, [PE32_FRAME]
     call    Process32First
     test    eax, eax
@@ -456,7 +457,7 @@ EnumProcesses:
 
     ; --- Process32Next ---
     mov     dword [PE32_FRAME + PE32_dwSize], PE32_SIZEOF
-    mov     rcx, [LOC_HSNAP]
+    mov     rcx, r13
     lea     rdx, [PE32_FRAME]
     call    Process32Next
     test    eax, eax
@@ -466,7 +467,7 @@ EnumProcesses:
     ; Done
     ; -----------------------------------------------------------------------
 .done_enum:
-    mov     rcx, [LOC_HSNAP]
+    mov     rcx, r13
     call    CloseHandle
 
     mov     eax, [rel procCount]
@@ -485,7 +486,8 @@ EnumProcesses:
     xor     eax, eax
 
 .epilog:
-    add     rsp, 520
+    add     rsp, 528
+    pop     r13
     pop     r14
     pop     r12
     pop     rdi
@@ -498,4 +500,3 @@ EnumProcesses:
 %undef PMC_FRAME
 %undef FT_FRAME
 %undef SID_FRAME
-%undef LOC_HSNAP
