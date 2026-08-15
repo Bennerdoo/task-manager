@@ -166,6 +166,7 @@ global WndProc
 %define LVS_SHOWSELALWAYS     0x0008
 %define LVS_SINGLESEL         0x0004
 %define LVS_EX_FULLROWSELECT  0x00000020
+%define LVM_SORTITEMS         0x1030
 %define LVM_SORTITEMSEX       0x1051
 %define SB_SETPARTS           0x0404
 %define MF_STRING             0
@@ -834,12 +835,18 @@ WndProc:
     mov     [rel sortColumn], ecx
     mov     dword [rel sortAscending], 1   ; default ascending
 .do_sort:
-    ; LVM_SORTITEMSEX(hListView, SortCompareProc, sortColumn)
+    ; LVM_SORTITEMS passes stored lParam (PROC_ENTRY*) to comparator — correct.
+    ; LVM_SORTITEMSEX passes item *indices*, which SortCompareProc would
+    ; dereference as pointers → crash.
     mov     rcx, [rel hListView]
-    mov     edx, LVM_SORTITEMSEX
+    mov     edx, LVM_SORTITEMS
     lea     r8, [rel SortCompareProc]
     mov     r9d, [rel sortColumn]
     call    SendMessageA
+    ; Repopulate with fresh lParam pointers from current procTable.
+    ; This also prevents stale-pointer crashes if procTable was reallocated
+    ; between the last timer tick and this column click.
+    call    RefreshListView
     xor     eax, eax
     jmp     .epilog
 
