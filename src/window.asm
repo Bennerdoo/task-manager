@@ -83,6 +83,7 @@ extern clientHeight
 extern minWidth
 extern minHeight
 extern searchFilter
+extern procCount
 
 extern szClassName
 extern szWindowTitle
@@ -835,18 +836,22 @@ WndProc:
     mov     [rel sortColumn], ecx
     mov     dword [rel sortAscending], 1   ; default ascending
 .do_sort:
-    ; LVM_SORTITEMS passes stored lParam (PROC_ENTRY*) to comparator — correct.
-    ; LVM_SORTITEMSEX passes item *indices*, which SortCompareProc would
-    ; dereference as pointers → crash.
+    ; Refresh proc table first so ListView lParam values are fresh and valid
+    ; before LVM_SORTITEMS fires the comparator. Stale lParam pointers from
+    ; a prior timer-refresh reallocation cause an immediate crash.
+    call    EnumProcesses
+    call    RefreshListView
+
+    ; Now sort the freshly-populated list. sortColumn and sortAscending are
+    ; already updated above, so the comparator has the correct context.
+    cmp     dword [rel procCount], 0
+    je      .sort_done              ; nothing to sort, skip
     mov     rcx, [rel hListView]
     mov     edx, LVM_SORTITEMS
     lea     r8, [rel SortCompareProc]
     mov     r9d, [rel sortColumn]
     call    SendMessageA
-    ; Repopulate with fresh lParam pointers from current procTable.
-    ; This also prevents stale-pointer crashes if procTable was reallocated
-    ; between the last timer tick and this column click.
-    call    RefreshListView
+.sort_done:
     xor     eax, eax
     jmp     .epilog
 
